@@ -86,6 +86,7 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
         "docx_path": docx_path,
         "cleaned_csv_path": cleaned_csv_path,
         "zip_path": zip_path,
+        "status": "completed",
     }
 
 
@@ -497,14 +498,14 @@ def _build_notebook(
         "for col in num_cols:\n"
         "    if cleaned[col].isnull().any():\n"
         "        med = cleaned[col].median()\n"
-        "        cleaned[col].fillna(med, inplace=True)\n\n"
+        "        cleaned[col] = cleaned[col].fillna(med)\n\n"
         "# Fill categorical NaN with mode\n"
         "cat_cols = cleaned.select_dtypes(include=['object','category']).columns.tolist()\n"
         "for col in cat_cols:\n"
         "    if cleaned[col].isnull().any():\n"
         "        mode_val = cleaned[col].mode()\n"
         "        if not mode_val.empty:\n"
-        "            cleaned[col].fillna(mode_val[0], inplace=True)\n\n"
+        "            cleaned[col] = cleaned[col].fillna(mode_val[0])\n\n"
         "# Remove IQR outliers from numeric columns (cap to 1.5*IQR)\n"
         "for col in num_cols:\n"
         "    q1, q3 = cleaned[col].quantile(0.25), cleaned[col].quantile(0.75)\n"
@@ -544,10 +545,12 @@ def _build_notebook(
 
 def _execute_notebook(notebook_path: str) -> None:
     """Execute the notebook in-place using jupyter nbconvert."""
+    import sys
+    # Use the same Python interpreter's jupyter (works in venv)
+    jupyter_cmd = [sys.executable, "-m", "jupyter", "nbconvert"]
     try:
         result = subprocess.run(
-            [
-                "jupyter", "nbconvert",
+            jupyter_cmd + [
                 "--to", "notebook",
                 "--execute",
                 "--inplace",
@@ -662,7 +665,7 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in num_cols:
         if cleaned[col].isnull().any():
-            cleaned[col].fillna(cleaned[col].median(), inplace=True)
+            cleaned[col] = cleaned[col].fillna(cleaned[col].median())
         q1, q3 = cleaned[col].quantile(0.25), cleaned[col].quantile(0.75)
         iqr = q3 - q1
         cleaned[col] = cleaned[col].clip(q1 - 1.5 * iqr, q3 + 1.5 * iqr)
@@ -671,7 +674,7 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         if cleaned[col].isnull().any():
             mode = cleaned[col].mode()
             if not mode.empty:
-                cleaned[col].fillna(mode[0], inplace=True)
+                cleaned[col] = cleaned[col].fillna(mode[0])
 
     return cleaned
 

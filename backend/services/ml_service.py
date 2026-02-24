@@ -228,6 +228,7 @@ async def build_and_run_pipeline(
         "notebook_path": notebook_path,
         "accuracy": accuracy,
         "metrics": json.dumps(metrics),
+        "status": "completed",
     }
 
 
@@ -335,6 +336,21 @@ def _build_preprocessing_pipeline(
     return pipeline, None
 
 
+def _normalize_model_name(name: str, registry: dict) -> str:
+    """Case-insensitive / underscore-insensitive model name lookup."""
+    # Direct match
+    if name in registry:
+        return name
+    # Normalize: lowercase, remove underscores/spaces for comparison
+    def _norm(s: str) -> str:
+        return s.lower().replace("_", "").replace(" ", "")
+    normalized = _norm(name)
+    for key in registry:
+        if _norm(key) == normalized:
+            return key
+    return name  # unchanged (will fall back to first)
+
+
 def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]) -> Any:
     """Return an sklearn estimator instance for the given model type and name."""
     registry: Dict[str, Any] = {}
@@ -345,10 +361,13 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
     elif model_type == "clustering":
         registry = _CLUSTERERS
 
+    model_name = _normalize_model_name(model_name, registry)
+
     if model_name not in registry:
         # Fallback to the first available model of the requested type
-        model_name = next(iter(registry))
-        logger.warning("Unknown model '%s', falling back to '%s'", model_name, model_name)
+        fallback = next(iter(registry))
+        logger.warning("Unknown model '%s', falling back to '%s'", model_name, fallback)
+        model_name = fallback
 
     estimator = registry[model_name]
 
@@ -435,9 +454,29 @@ def _build_pipeline_notebook(
         "preprocessor = ColumnTransformer(transformers=transformers, remainder='drop') if transformers else 'passthrough'\n"
     ))
 
+    # Map model name to actual sklearn class name and module
+    _CLASS_MAP = {
+        "LogisticRegression": ("linear_model", "LogisticRegression"),
+        "RandomForest": ("ensemble", "RandomForestClassifier"),
+        "GradientBoosting": ("ensemble", "GradientBoostingClassifier"),
+        "SVM": ("svm", "SVC"),
+        "KNN": ("neighbors", "KNeighborsClassifier"),
+        "DecisionTree": ("tree", "DecisionTreeClassifier"),
+        "LinearRegression": ("linear_model", "LinearRegression"),
+        "Ridge": ("linear_model", "Ridge"),
+        "Lasso": ("linear_model", "Lasso"),
+        "RandomForestRegressor": ("ensemble", "RandomForestRegressor"),
+        "GradientBoostingRegressor": ("ensemble", "GradientBoostingRegressor"),
+        "SVR": ("svm", "SVR"),
+        "KMeans": ("cluster", "KMeans"),
+        "DBSCAN": ("cluster", "DBSCAN"),
+        "AgglomerativeClustering": ("cluster", "AgglomerativeClustering"),
+    }
+    _mod, _cls = _CLASS_MAP.get(model_name, ("ensemble", model_name))
+
     cells.append(new_markdown_cell("## Model Training"))
     cells.append(new_code_cell(
-        f"from sklearn.{_get_sklearn_module(model_type, model_name)} import {model_name.replace('Regressor','').replace('Classifier','') if 'XGBoost' not in model_name else model_name}\n"
+        f"from sklearn.{_mod} import {_cls}\n"
         "# Note: model already trained in background — loading saved artifact\n"
         f"artifact = joblib.load(r'{output_folder}/model.joblib')\n"
         "pipeline = artifact['pipeline']\n"
@@ -557,10 +596,11 @@ def _get_sklearn_module(model_type: str, model_name: str) -> str:
 
 def _execute_notebook(notebook_path: str) -> None:
     """Execute *notebook_path* in-place using jupyter nbconvert."""
+    import sys
     try:
         result = subprocess.run(
             [
-                "jupyter", "nbconvert",
+                sys.executable, "-m", "jupyter", "nbconvert",
                 "--to", "notebook",
                 "--execute",
                 "--inplace",
@@ -574,6 +614,8 @@ def _execute_notebook(notebook_path: str) -> None:
         )
         if result.returncode != 0:
             logger.warning("nbconvert stderr: %s", result.stderr[-2000:])
+        else:
+            logger.info("Notebook executed: %s", notebook_path)
     except FileNotFoundError:
         logger.warning("jupyter nbconvert not found — notebook will not be executed")
     except subprocess.TimeoutExpired:
