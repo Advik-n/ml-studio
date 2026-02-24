@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import type { EDAJob, EDAJobStatus } from "@/lib/types";
 
 const STEPS: { key: EDAJobStatus; label: string }[] = [

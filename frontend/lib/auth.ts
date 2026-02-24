@@ -21,6 +21,8 @@ export async function login(username: string, password: string): Promise<AuthTok
 
   const tokens = response.data;
   localStorage.setItem("access_token", tokens.access_token);
+  // Also set a cookie so middleware can detect the session on the server
+  document.cookie = `access_token=${tokens.access_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
   return tokens;
 }
 
@@ -36,6 +38,8 @@ export async function verifyEmail(email: string, code: string): Promise<void> {
 export function logout(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem("access_token");
+    // Clear the cookie the middleware reads
+    document.cookie = "access_token=; path=/; max-age=0; SameSite=Lax";
     window.location.href = "/login";
   }
 }

@@ -10,7 +10,7 @@ import { Eye, EyeOff, Brain, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { register as registerUser, verifyEmail } from "@/lib/auth";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import Link from "next/link";
 
 const step1Schema = z.object({

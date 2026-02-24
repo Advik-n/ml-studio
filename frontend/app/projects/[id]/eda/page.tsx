@@ -36,7 +36,7 @@ export default function EDAPage() {
       setProject(projRes.data);
       setEdaJobs(edaRes.data);
       const latest = edaRes.data[0];
-      if (latest && latest.status !== "completed" && latest.status !== "failed") {
+      if (latest && latest.status !== "failed") {
         setActiveJob(latest);
       }
     } catch {
@@ -53,9 +53,9 @@ export default function EDAPage() {
     setEdaJobs((prev) => [job, ...prev]);
   };
 
-  const handleJobUpdate = (updated: EDAJob) => {
+  const handleJobUpdate = useCallback((updated: EDAJob) => {
     setEdaJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
-  };
+  }, []);
 
   if (loading || !project) {
     return (

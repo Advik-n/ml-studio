@@ -26,7 +26,7 @@ const typeConfig = {
 
 interface ProjectCardProps {
   project: Project;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
 }
 
 export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
@@ -39,7 +39,11 @@ export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
     if (!onDelete) return;
     if (!confirm(`Delete "${project.name}"? This cannot be undone.`)) return;
     setDeleting(true);
-    onDelete(project.id);
+    try {
+      await onDelete(project.id);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (

@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
   LayoutDashboard,
@@ -114,6 +114,7 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
               <ChevronDown className="h-3 w-3 text-[var(--text-muted)]" />
             </button>
 
+            <AnimatePresence>
             {dropdownOpen && (
               <motion.div
                 initial={{ opacity: 0, y: -8 }}
@@ -142,6 +143,7 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
                 </button>
               </motion.div>
             )}
+            </AnimatePresence>
           </div>
         </div>
       </div>

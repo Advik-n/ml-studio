@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import type { PipelineJob } from "@/lib/types";
 
 interface PipelineResultsProps {
@@ -64,7 +64,8 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
   const handleDownloadNotebook = () => {
     if (!job.notebook_url) { toast.error("Notebook not available."); return; }
     const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    window.open(`${BASE}${job.notebook_url}`, "_blank");
+    const url = job.notebook_url;
+    window.open(url.startsWith("http") ? url : `${BASE}${url}`, "_blank");
   };
 
   const metricsEntries = job.metrics

@@ -55,10 +55,10 @@ export default function PipelinePage() {
     setPipelineJobs((prev) => [job, ...prev]);
   };
 
-  const handleJobUpdate = (updated: PipelineJob) => {
+  const handleJobUpdate = useCallback((updated: PipelineJob) => {
     setActiveJob(updated);
     setPipelineJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
-  };
+  }, []);
 
   if (loading || !project) {
     return (

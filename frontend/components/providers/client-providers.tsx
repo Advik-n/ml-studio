@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Toaster } from "react-hot-toast";
+import { Toaster } from "sonner";
 import ThemeProvider from "@/components/providers/theme-provider";
 
 type ClientProvidersProps = {
@@ -14,8 +14,8 @@ export default function ClientProviders({ children }: ClientProvidersProps) {
       {children}
       <Toaster
         position="top-right"
+        duration={4000}
         toastOptions={{
-          duration: 4000,
           style: {
             background: "var(--surface)",
             color: "var(--text)",

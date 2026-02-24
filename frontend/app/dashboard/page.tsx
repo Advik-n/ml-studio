@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import api from "@/lib/api";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import type { Project, User } from "@/lib/types";
 
 export default function DashboardPage() {

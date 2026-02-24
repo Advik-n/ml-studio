@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { setTheme, getTheme, type Theme } from "@/lib/theme";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 interface ThemePreview {
   id: Theme;

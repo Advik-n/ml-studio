@@ -6,7 +6,7 @@ import { Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import type { PipelineJob, PredictResponse } from "@/lib/types";
 
 interface PredictionGUIProps {

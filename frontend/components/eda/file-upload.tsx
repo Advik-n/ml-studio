@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatFileSize } from "@/lib/utils";
 import api from "@/lib/api";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import type { EDAJob } from "@/lib/types";
 
 const ACCEPTED_FORMATS = {
