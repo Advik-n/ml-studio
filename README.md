@@ -91,12 +91,21 @@ npm i -g vercel
 vercel --prod
 ```
 
-### Backend → Railway
-1. Push repo to GitHub ✅
-2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. Select `ml-studio` repo → set root to `backend/`
-4. Add environment variables from `backend/.env.example`
-5. Copy Railway URL → set `NEXT_PUBLIC_API_URL` in Vercel
+### Backend → Render (Free)
+1. Go to [render.com](https://render.com) → New → Web Service
+2. Connect your GitHub → select `ml-studio` repo → root directory: `backend/`
+3. Render auto-detects `render.yaml` and fills in all settings
+4. Click **Create Web Service** (free plan)
+5. Copy the Render URL (e.g. `https://ml-studio-api.onrender.com`)
+6. Set `NEXT_PUBLIC_API_URL` to that URL in Vercel
+
+> **Note:** Render free tier spins down after 15 min of inactivity (cold start ~30s). Upgrade to $7/mo to keep it always-on.
+
+### Alternative: Hugging Face Spaces (Always Free)
+1. Go to [huggingface.co/new-space](https://huggingface.co/new-space)
+2. SDK: **Docker**, set visibility: Public
+3. Link your GitHub repo or upload `backend/` contents
+4. Uses port `7860` (already configured in `Dockerfile`)
 
 ## 📁 Environment Variables
 
@@ -108,13 +117,13 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
-BASE_URL=https://your-railway-url.up.railway.app
+BASE_URL=https://your-app.onrender.com
 FRONTEND_URL=https://your-app.vercel.app
 ```
 
 ### Frontend (`frontend/.env.local`)
 ```
-NEXT_PUBLIC_API_URL=https://your-railway-url.up.railway.app
+NEXT_PUBLIC_API_URL=https://your-app.onrender.com
 ```
 
 ## 🛠️ Tech Stack
