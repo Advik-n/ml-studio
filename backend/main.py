@@ -4,6 +4,7 @@ ML Studio — FastAPI application entry point.
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,12 +20,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Lifespan (replaces deprecated on_event)
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create database tables and ensure uploads directory exists on startup."""
+    Base.metadata.create_all(bind=engine)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    logger.info("Database tables created (or already exist).")
+    logger.info("Upload directory: %s", os.path.abspath(settings.UPLOAD_DIR))
+    yield  # app runs here
+    # shutdown logic (if any) goes after yield
+
+
 app = FastAPI(
     title="ML Studio API",
     description="Backend API for the ML Studio web application.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,18 +69,6 @@ app.include_router(pipeline.router)
 UPLOAD_DIR = settings.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
-
-# ---------------------------------------------------------------------------
-# Startup
-# ---------------------------------------------------------------------------
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Create database tables and ensure the uploads directory exists."""
-    Base.metadata.create_all(bind=engine)
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    logger.info("Database tables created (or already exist).")
-    logger.info("Upload directory: %s", os.path.abspath(settings.UPLOAD_DIR))
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,12 @@
 """Application configuration using pydantic-settings."""
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     SECRET_KEY: str = "ml-studio-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
@@ -18,10 +21,6 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     BASE_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:3000"
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
 
 
 settings = Settings()
