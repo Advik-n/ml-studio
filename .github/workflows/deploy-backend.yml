@@ -33,9 +33,12 @@ jobs:
       - name: Test startup
         run: |
           cd backend
-          timeout 5 uvicorn main:app --host 0.0.0.0 --port 8765 &
-          sleep 3
-          curl -f http://localhost:8765/health && echo "Health check passed"
+          uvicorn main:app --host 0.0.0.0 --port 8765 &
+          for i in $(seq 1 15); do
+            sleep 1
+            curl -sf http://localhost:8765/health && echo "Health check passed" && break
+            if [ "$i" = "15" ]; then echo "Server did not start" && exit 1; fi
+          done
           kill %1 || true
 
   deploy:

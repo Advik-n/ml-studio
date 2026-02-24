@@ -11,6 +11,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Only run if VERCEL_TOKEN secret is configured
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +29,7 @@ jobs:
       - name: Build
         run: cd frontend && npm run build
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'http://localhost:8000' }}
 
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v25

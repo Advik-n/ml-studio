@@ -83,29 +83,38 @@ npm run dev
 ```
 App at: http://localhost:3000
 
-## 🌐 Deployment
+## 🌐 Deployment (100% Free)
 
-### Frontend → Vercel
-```bash
-npm i -g vercel
-vercel --prod
-```
+### Step 1: Deploy Backend → Render (Free)
+1. Go to [render.com](https://render.com) → **New → Web Service**
+2. Connect GitHub → select `ml-studio` repo → root directory: `backend/`
+3. Render auto-reads `render.yaml` — just click **Create Web Service** (free plan)
+4. Add env vars from `backend/.env.example` in Render dashboard
+5. Copy your Render URL: `https://ml-studio-api.onrender.com`
 
-### Backend → Render (Free)
-1. Go to [render.com](https://render.com) → New → Web Service
-2. Connect your GitHub → select `ml-studio` repo → root directory: `backend/`
-3. Render auto-detects `render.yaml` and fills in all settings
-4. Click **Create Web Service** (free plan)
-5. Copy the Render URL (e.g. `https://ml-studio-api.onrender.com`)
-6. Set `NEXT_PUBLIC_API_URL` to that URL in Vercel
+> **Note:** Render free tier spins down after 15 min idle (cold start ~30s). Still free!
 
-> **Note:** Render free tier spins down after 15 min of inactivity (cold start ~30s). Upgrade to $7/mo to keep it always-on.
+### Step 2: Deploy Frontend → Vercel (Free)
+1. Go to [vercel.com/new](https://vercel.com/new) → Import `ml-studio` repo
+2. Set **Root Directory** to `frontend/`
+3. Add environment variable: `NEXT_PUBLIC_API_URL` = your Render URL
+4. Click **Deploy** → get your `https://ml-studio-xxx.vercel.app` URL
 
-### Alternative: Hugging Face Spaces (Always Free)
-1. Go to [huggingface.co/new-space](https://huggingface.co/new-space)
-2. SDK: **Docker**, set visibility: Public
-3. Link your GitHub repo or upload `backend/` contents
-4. Uses port `7860` (already configured in `Dockerfile`)
+### Step 3: Auto-Deploy via GitHub Actions (Optional)
+For automatic deployments on every `git push`, add these **GitHub Secrets** in  
+[github.com/Advik-n/ml-studio/settings/secrets/actions](https://github.com/Advik-n/ml-studio/settings/secrets/actions):
+
+| Secret | Where to get it |
+|--------|----------------|
+| `VERCEL_TOKEN` | vercel.com → Settings → Tokens |
+| `VERCEL_ORG_ID` | vercel.com → Settings → General → Team ID |
+| `VERCEL_PROJECT_ID` | Vercel project → Settings → General |
+| `NEXT_PUBLIC_API_URL` | Your Render backend URL |
+| `RENDER_DEPLOY_HOOK` | Render dashboard → project → Settings → Deploy Hook |
+
+### Alternative Backend: Hugging Face Spaces (Always Free, No Spin-Down)
+1. [huggingface.co/new-space](https://huggingface.co/new-space) → SDK: **Docker**
+2. Upload `backend/` files — uses port `7860` (configured in `Dockerfile`)
 
 ## 📁 Environment Variables
 

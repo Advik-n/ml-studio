@@ -2,10 +2,12 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PipelineConfig(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     dataset_filename: str
     model_type: str          # classification / regression / clustering / nlp / image
     model_name: str
@@ -17,6 +19,8 @@ class PipelineConfig(BaseModel):
 
 
 class PipelineJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id: str
     project_id: str
     model_type: Optional[str]
@@ -28,8 +32,6 @@ class PipelineJobResponse(BaseModel):
     error_message: Optional[str]
     created_at: datetime
     completed_at: Optional[datetime]
-
-    model_config = {"from_attributes": True}
 
 
 class PredictRequest(BaseModel):
