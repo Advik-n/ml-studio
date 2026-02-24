@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import api from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import type { Project, User } from "@/lib/types";
 
 export default function DashboardPage() {

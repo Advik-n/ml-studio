@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { getCurrentUser, changePassword } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
 import type { User as UserType } from "@/lib/types";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 const passwordSchema = z
   .object({

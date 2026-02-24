@@ -6,7 +6,8 @@ import { Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
+import { extractApiError } from "@/lib/api-errors";
 import type { PipelineJob, PredictResponse } from "@/lib/types";
 
 interface PredictionGUIProps {
@@ -42,7 +43,7 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
       });
       setResult(res.data);
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Prediction failed.";
+      const msg = extractApiError(err, "Prediction failed.");
       setError(msg);
       toast.error(msg);
     } finally {

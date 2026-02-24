@@ -6,7 +6,7 @@ import { X, BarChart2, GitBranch, Layers, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import type { Project } from "@/lib/types";
 
 interface NewProjectModalProps {

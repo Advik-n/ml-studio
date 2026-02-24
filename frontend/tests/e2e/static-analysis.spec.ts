@@ -1,7 +1,8 @@
 /**
  * ML Studio – Static Analysis / Unit-style Tests
  * Tests run without a live server using TypeScript source analysis.
- * These verify: "use client" coverage, sonner migration, no react-hot-toast
+ * These verify: "use client" coverage, new toast system (@radix-ui/react-toast),
+ * removal of old libraries (sonner, react-hot-toast), error handling (extractApiError)
  */
 import { test, expect } from "@playwright/test";
 import * as fs from "fs";
@@ -59,9 +60,9 @@ test.describe("Static: 'use client' directive coverage", () => {
   });
 });
 
-// ─── react-hot-toast elimination ─────────────────────────────────────────────
+// ─── Old toast libraries eliminated ──────────────────────────────────────────
 
-test.describe("Static: react-hot-toast fully removed", () => {
+test.describe("Static: react-hot-toast and sonner fully removed", () => {
   test("no source files import from react-hot-toast", () => {
     const offenders: string[] = [];
     for (const file of allSourceFiles()) {
@@ -72,18 +73,51 @@ test.describe("Static: react-hot-toast fully removed", () => {
     }
     expect(offenders, `Still importing react-hot-toast: ${offenders.join(", ")}`).toHaveLength(0);
   });
+
+  test("no source files import from sonner", () => {
+    const offenders: string[] = [];
+    for (const file of allSourceFiles()) {
+      const content = readFile(file);
+      if (/from ['"]sonner['"]/.test(content)) {
+        offenders.push(file);
+      }
+    }
+    expect(offenders, `Still importing sonner: ${offenders.join(", ")}`).toHaveLength(0);
+  });
 });
 
-// ─── sonner Toaster provider ─────────────────────────────────────────────────
+// ─── New toast system with @radix-ui/react-toast ──────────────────────────────
 
-test.describe("Static: ToasterProvider uses sonner", () => {
-  test("toaster-provider.tsx imports Toaster from sonner", () => {
-    const content = readFile("components/providers/toaster-provider.tsx");
-    expect(content).toContain('from "sonner"');
-    expect(content).toContain("<Toaster");
+test.describe("Static: new toast system implementation", () => {
+  test("lib/toast.ts exists with subscribeToast export", () => {
+    const content = readFile("lib/toast.ts");
+    expect(content).toContain("export function subscribeToast");
   });
 
-  test("layout.tsx uses ToasterProvider (not direct Toaster)", () => {
+  test("lib/api-errors.ts exists with extractApiError export", () => {
+    const content = readFile("lib/api-errors.ts");
+    expect(content).toContain("export function extractApiError");
+  });
+
+  test("toaster-provider.tsx uses @radix-ui/react-toast", () => {
+    const content = readFile("components/providers/toaster-provider.tsx");
+    expect(content).toContain("@radix-ui/react-toast");
+    expect(content).not.toContain('from "sonner"');
+  });
+
+  test("register-form.tsx uses extractApiError from @/lib/api-errors", () => {
+    const content = readFile("components/auth/register-form.tsx");
+    expect(content).toContain("extractApiError");
+    expect(content).toContain("@/lib/api-errors");
+  });
+
+  test("prediction-gui.tsx uses extractApiError from @/lib/api-errors", () => {
+    const content = readFile("components/pipeline/prediction-gui.tsx");
+    expect(content).toContain("extractApiError");
+    expect(content).toContain("@/lib/api-errors");
+  });
+
+  test("layout.tsx uses ToasterProvider (not Toaster or old libraries)", () => {
     const content = readFile("app/layout.tsx");
     expect(content).toContain("ToasterProvider");
     expect(content).not.toContain('from "react-hot-toast"');

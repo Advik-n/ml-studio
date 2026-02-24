@@ -21,7 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import api from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import type { PipelineConfig, PipelineJob, TaskType } from "@/lib/types";
 import { formatFileSize } from "@/lib/utils";
 

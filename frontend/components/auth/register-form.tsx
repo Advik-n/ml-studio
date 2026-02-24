@@ -10,7 +10,8 @@ import { Eye, EyeOff, Brain, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { register as registerUser, verifyEmail } from "@/lib/auth";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
+import { extractApiError } from "@/lib/api-errors";
 import Link from "next/link";
 
 const step1Schema = z.object({
@@ -83,8 +84,7 @@ export default function RegisterForm() {
       toast.success("Account created! Check your email for the verification code.");
       setStep(4);
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Registration failed.";
-      toast.error(message);
+      toast.error(extractApiError(err, "Registration failed."));
     } finally {
       setIsLoading(false);
     }
