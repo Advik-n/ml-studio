@@ -1,4 +1,3 @@
-"use client";
 // Toast event bus — components call toast.success/error, the ToastProvider listens
 
 export type ToastVariant = "success" | "error" | "info";

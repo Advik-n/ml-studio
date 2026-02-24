@@ -69,7 +69,7 @@ export default function RegisterForm() {
   };
 
   const onStep3 = async (data: Step3Data) => {
-    if (data.captchaAnswer !== CAPTCHA_ANSWER) {
+    if (data.captchaAnswer.trim() !== CAPTCHA_ANSWER) {
       form3.setError("captchaAnswer", { message: "Incorrect answer. Try again." });
       return;
     }
@@ -244,7 +244,9 @@ export default function RegisterForm() {
             <Input
               label="Your Answer"
               placeholder="Enter the answer"
-              type="number"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               error={form3.formState.errors.captchaAnswer?.message}
               {...form3.register("captchaAnswer")}
             />
