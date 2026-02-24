@@ -1,0 +1,32 @@
+# Dependencies
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/ml_studio.db
+backend/uploads/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Environment
+backend/.env
+frontend/.env.local
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Generated outputs (user-generated, not source)
+# backend/uploads is gitignored above
+*.zip
+*.pkl
+*.joblib
+
+# Logs
+*.log
