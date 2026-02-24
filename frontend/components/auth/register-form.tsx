@@ -15,7 +15,7 @@ import { extractApiError } from "@/lib/api-errors";
 import Link from "next/link";
 
 const step1Schema = z.object({
-  full_name: z.string().min(2, "Full name must be at least 2 characters"),
+  name: z.string().min(2, "Full name must be at least 2 characters"),
   username: z.string().min(3, "Username must be at least 3 characters").regex(/^[a-zA-Z0-9_]+$/, "Only letters, numbers, and underscores"),
   email: z.string().email("Invalid email address"),
 });
@@ -76,10 +76,11 @@ export default function RegisterForm() {
     setIsLoading(true);
     try {
       await registerUser({
-        full_name: formData.full_name!,
+        name: formData.name!,
         username: formData.username!,
         email: formData.email!,
         password: formData.password!,
+        confirm_password: formData.confirmPassword!,
       });
       toast.success("Account created! Check your email for the verification code.");
       setStep(4);
@@ -151,8 +152,8 @@ export default function RegisterForm() {
             <Input
               label="Full Name"
               placeholder="John Doe"
-              error={form1.formState.errors.full_name?.message}
-              {...form1.register("full_name")}
+              error={form1.formState.errors.name?.message}
+              {...form1.register("name")}
             />
             <Input
               label="Username"

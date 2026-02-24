@@ -21,7 +21,7 @@ import type { Project } from "@/lib/types";
 const typeConfig = {
   eda: { label: "EDA", icon: <BarChart2 className="h-3.5 w-3.5" />, variant: "eda" as const },
   pipeline: { label: "Pipeline", icon: <GitBranch className="h-3.5 w-3.5" />, variant: "pipeline" as const },
-  both: { label: "Full Suite", icon: <Layers className="h-3.5 w-3.5" />, variant: "both" as const },
+  mixed: { label: "Full Suite", icon: <Layers className="h-3.5 w-3.5" />, variant: "mixed" as const },
 };
 
 interface ProjectCardProps {
@@ -32,7 +32,7 @@ interface ProjectCardProps {
 export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
-  const config = typeConfig[project.type];
+  const config = typeConfig[project.project_type as keyof typeof typeConfig];
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -55,9 +55,9 @@ export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
         {/* Color accent bar */}
         <div
           className={`h-1.5 w-full ${
-            project.type === "eda"
+            project.project_type === "eda"
               ? "bg-gradient-to-r from-blue-500 to-cyan-400"
-              : project.type === "pipeline"
+              : project.project_type === "pipeline"
               ? "bg-gradient-to-r from-purple-500 to-violet-400"
               : "bg-gradient-to-r from-emerald-500 to-teal-400"
           }`}

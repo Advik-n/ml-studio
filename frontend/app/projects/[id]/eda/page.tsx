@@ -30,7 +30,7 @@ export default function EDAPage() {
       const [userData, projRes, edaRes] = await Promise.all([
         getCurrentUser(),
         api.get<Project>(`/projects/${id}`),
-        api.get<EDAJob[]>(`/projects/${id}/eda`),
+        api.get<EDAJob[]>(`/eda/${id}/jobs`),
       ]);
       setUser(userData);
       setProject(projRes.data);
@@ -67,7 +67,7 @@ export default function EDAPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <Navbar userName={user?.full_name || user?.username} />
+      <Navbar userName={user?.name || user?.username} />
       <div className="flex">
         <Sidebar projectId={id} projectName={project.name} />
         <main className="flex-1 p-6">
@@ -130,7 +130,7 @@ export default function EDAPage() {
                       >
                         <CardContent className="flex items-center justify-between p-4">
                           <div>
-                            <p className="text-sm font-medium text-[var(--text)]">{job.filename}</p>
+                            <p className="text-sm font-medium text-[var(--text)]">{job.input_filename}</p>
                             <p className="flex items-center gap-1 text-xs text-[var(--text-muted)] mt-0.5">
                               <CalendarDays className="h-3 w-3" />
                               {formatDate(job.created_at)}

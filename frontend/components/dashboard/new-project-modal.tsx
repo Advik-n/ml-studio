@@ -33,7 +33,7 @@ const types = [
     selectedColor: "border-purple-500 bg-purple-500/15",
   },
   {
-    value: "both" as const,
+    value: "mixed" as const,
     label: "Full Suite",
     description: "EDA + ML Pipeline",
     icon: <Layers className="h-6 w-6" />,
@@ -45,7 +45,7 @@ const types = [
 export default function NewProjectModal({ open, onClose, onCreated }: NewProjectModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState<"eda" | "pipeline" | "both">("both");
+  const [type, setType] = useState<"eda" | "pipeline" | "mixed">("mixed");
   const [nameError, setNameError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -57,12 +57,12 @@ export default function NewProjectModal({ open, onClose, onCreated }: NewProject
     setNameError("");
     setIsLoading(true);
     try {
-      const response = await api.post<Project>("/projects", { name: name.trim(), description, type });
+      const response = await api.post<Project>("/projects", { name: name.trim(), description, project_type: type });
       toast.success("Project created!");
       onCreated(response.data);
       setName("");
       setDescription("");
-      setType("both");
+      setType("mixed");
       onClose();
     } catch {
       toast.error("Failed to create project.");

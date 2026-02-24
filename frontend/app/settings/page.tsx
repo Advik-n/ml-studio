@@ -62,7 +62,7 @@ export default function SettingsPage() {
   const onPasswordSubmit = async (data: PasswordForm) => {
     setChangingPw(true);
     try {
-      await changePassword(data.current_password, data.new_password);
+      await changePassword(data.current_password, data.new_password, data.confirm_password);
       toast.success("Password changed successfully!");
       reset();
     } catch {
@@ -80,7 +80,7 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <Navbar userName={user?.full_name || user?.username} />
+      <Navbar userName={user?.name || user?.username} />
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-2xl font-bold text-[var(--text)] mb-6">Settings</h1>
@@ -117,7 +117,7 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <p className="text-xs text-[var(--text-muted)] mb-1">Full Name</p>
-                        <p className="text-sm font-medium text-[var(--text)]">{user.full_name}</p>
+                        <p className="text-sm font-medium text-[var(--text)]">{user.name}</p>
                       </div>
                       <div>
                         <p className="text-xs text-[var(--text-muted)] mb-1">Username</p>

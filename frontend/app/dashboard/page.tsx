@@ -50,9 +50,9 @@ export default function DashboardPage() {
 
   const stats = [
     { label: "Total Projects", value: projects.length, icon: <Folder className="h-5 w-5" />, color: "text-blue-500 bg-blue-500/10" },
-    { label: "EDA Projects", value: projects.filter((p) => p.type === "eda" || p.type === "both").length, icon: <BarChart2 className="h-5 w-5" />, color: "text-purple-500 bg-purple-500/10" },
-    { label: "ML Pipelines", value: projects.filter((p) => p.type === "pipeline" || p.type === "both").length, icon: <GitBranch className="h-5 w-5" />, color: "text-emerald-500 bg-emerald-500/10" },
-    { label: "Full Suite", value: projects.filter((p) => p.type === "both").length, icon: <Layers className="h-5 w-5" />, color: "text-orange-500 bg-orange-500/10" },
+    { label: "EDA Projects", value: projects.filter((p) => p.project_type === "eda" || p.project_type === "mixed").length, icon: <BarChart2 className="h-5 w-5" />, color: "text-purple-500 bg-purple-500/10" },
+    { label: "ML Pipelines", value: projects.filter((p) => p.project_type === "pipeline" || p.project_type === "mixed").length, icon: <GitBranch className="h-5 w-5" />, color: "text-emerald-500 bg-emerald-500/10" },
+    { label: "Full Suite", value: projects.filter((p) => p.project_type === "mixed").length, icon: <Layers className="h-5 w-5" />, color: "text-orange-500 bg-orange-500/10" },
   ];
 
   if (loading) {
@@ -72,7 +72,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <Navbar userName={user?.full_name || user?.username} />
+      <Navbar userName={user?.name || user?.username} />
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {/* Welcome */}
@@ -82,7 +82,7 @@ export default function DashboardPage() {
           className="mb-8"
         >
           <h1 className="text-2xl font-bold text-[var(--text)]">
-            Welcome back, {user?.full_name?.split(" ")[0] || user?.username} 👋
+            Welcome back, {user?.name?.split(" ")[0] || user?.username} 👋
           </h1>
           <p className="text-[var(--text-muted)] mt-1">
             Manage your machine learning projects and experiments

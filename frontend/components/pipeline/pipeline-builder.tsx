@@ -176,26 +176,23 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     try {
       const config: PipelineConfig = {
         dataset_filename: datasetFilename,
-        task_type: taskType,
+        model_type: taskType,
         model_name: modelName,
         feature_columns: featureColumns,
         target_column: taskType !== "clustering" ? targetColumn : undefined,
         test_size: testSize,
         transformers: selectedTransformers,
-        hyperparameters,
+        hyperparams: hyperparameters,
       };
 
-      let jobResponse;
       if (datasetFile) {
         const formData = new FormData();
         formData.append("file", datasetFile);
-        formData.append("config", JSON.stringify(config));
-        jobResponse = await api.post<PipelineJob>(`/projects/${projectId}/pipeline`, formData, {
+        await api.post(`/pipeline/${projectId}/upload-dataset`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
-      } else {
-        jobResponse = await api.post<PipelineJob>(`/projects/${projectId}/pipeline`, { config });
       }
+      const jobResponse = await api.post<PipelineJob>(`/pipeline/${projectId}/configure`, config);
 
       toast.success("Pipeline started!");
       onJobCreated(jobResponse.data);

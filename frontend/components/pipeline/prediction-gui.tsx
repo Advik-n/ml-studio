@@ -15,7 +15,7 @@ interface PredictionGUIProps {
 }
 
 export default function PredictionGUI({ job }: PredictionGUIProps) {
-  const featureCols = job.config.feature_columns;
+  const featureCols: string[] = (job as any).config?.feature_columns ?? [];
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(featureCols.map((f) => [f, ""]))
   );
@@ -37,8 +37,7 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
     setError(null);
     setResult(null);
     try {
-      const res = await api.post<PredictResponse>("/predict", {
-        pipeline_job_id: job.id,
+      const res = await api.post<PredictResponse>(`/pipeline/jobs/${job.id}/predict`, {
         features,
       });
       setResult(res.data);

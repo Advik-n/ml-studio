@@ -11,13 +11,7 @@ export function isAuthenticated(): boolean {
 }
 
 export async function login(username: string, password: string): Promise<AuthTokens> {
-  const formData = new URLSearchParams();
-  formData.append("username", username);
-  formData.append("password", password);
-
-  const response = await api.post<AuthTokens>("/auth/token", formData, {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  });
+  const response = await api.post<AuthTokens>("/auth/login", { username, password });
 
   const tokens = response.data;
   localStorage.setItem("access_token", tokens.access_token);
@@ -51,7 +45,8 @@ export async function getCurrentUser(): Promise<User> {
 
 export async function changePassword(
   current_password: string,
-  new_password: string
+  new_password: string,
+  confirm_new_password?: string
 ): Promise<void> {
-  await api.post("/auth/change-password", { current_password, new_password });
+  await api.put("/auth/change-password", { current_password, new_password, confirm_new_password: confirm_new_password ?? new_password });
 }

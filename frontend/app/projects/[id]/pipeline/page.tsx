@@ -31,14 +31,14 @@ export default function PipelinePage() {
       const [userData, projRes, pipeRes] = await Promise.all([
         getCurrentUser(),
         api.get<Project>(`/projects/${id}`),
-        api.get<PipelineJob[]>(`/projects/${id}/pipeline`),
+        api.get<PipelineJob[]>(`/pipeline/${id}/jobs`),
       ]);
       setUser(userData);
       setProject(projRes.data);
       setPipelineJobs(pipeRes.data);
       // Set most recent active job
       const latest = pipeRes.data[0];
-      if (latest && (latest.status === "running" || latest.status === "completed")) {
+      if (latest && (latest.status === "processing" || latest.status === "completed")) {
         setActiveJob(latest);
       }
     } catch {
@@ -70,7 +70,7 @@ export default function PipelinePage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <Navbar userName={user?.full_name || user?.username} />
+      <Navbar userName={user?.name || user?.username} />
       <div className="flex">
         <Sidebar projectId={id} projectName={project.name} />
         <main className="flex-1 p-6">
@@ -153,7 +153,7 @@ export default function PipelinePage() {
                         <CardContent className="flex items-center justify-between p-4">
                           <div>
                             <p className="text-sm font-medium text-[var(--text)]">
-                              {job.config.model_name} · {job.config.task_type}
+                              {job.model_name} · {job.model_type}
                             </p>
                             <p className="flex items-center gap-1 text-xs text-[var(--text-muted)] mt-0.5">
                               <CalendarDays className="h-3 w-3" />
@@ -161,9 +161,9 @@ export default function PipelinePage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            {job.metrics?.accuracy !== undefined && (
+                            {job.accuracy !== undefined && job.accuracy !== null && (
                               <span className="text-xs font-medium text-[var(--primary)]">
-                                {(job.metrics.accuracy * 100).toFixed(1)}% acc
+                                {(job.accuracy * 100).toFixed(1)}% acc
                               </span>
                             )}
                             <Badge

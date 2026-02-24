@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
+from sklearn.base import clone
 import matplotlib
 matplotlib.use("Agg")
 
@@ -369,7 +370,8 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
         logger.warning("Unknown model '%s', falling back to '%s'", model_name, fallback)
         model_name = fallback
 
-    estimator = registry[model_name]
+    # Clone to avoid mutating the shared global registry instance
+    estimator = clone(registry[model_name])
 
     # Apply user hyperparams (use set_params to avoid creating a new instance)
     if hyperparams:

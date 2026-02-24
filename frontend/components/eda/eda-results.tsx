@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Download,
   FileText,
   BookOpen,
   FileBarChart,
@@ -12,8 +11,6 @@ import {
   Loader2,
   AlertCircle,
   Table2,
-  Hash,
-  Columns,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,26 +20,21 @@ import { toast } from "@/lib/toast";
 import type { EDAJob, EDAJobStatus } from "@/lib/types";
 
 const STEPS: { key: EDAJobStatus; label: string }[] = [
-  { key: "uploading", label: "Uploading" },
-  { key: "analyzing", label: "Analyzing" },
-  { key: "generating_notebook", label: "Generating Notebook" },
-  { key: "creating_report", label: "Creating Report" },
-  { key: "cleaning_data", label: "Cleaning Data" },
+  { key: "pending", label: "Pending" },
+  { key: "processing", label: "Processing" },
   { key: "completed", label: "Complete" },
 ];
 
-const stepOrder: EDAJobStatus[] = [
-  "pending",
-  "uploading",
-  "analyzing",
-  "generating_notebook",
-  "creating_report",
-  "cleaning_data",
-  "completed",
-];
+const stepOrder: EDAJobStatus[] = ["pending", "processing", "completed"];
 
 function getStepIndex(status: EDAJobStatus) {
   return stepOrder.indexOf(status);
+}
+
+function getProgress(status: EDAJobStatus): number {
+  if (status === "completed") return 100;
+  if (status === "processing") return 50;
+  return 0;
 }
 
 interface EDAResultsProps {
@@ -63,7 +55,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
 
     const interval = setInterval(async () => {
       try {
-        const response = await api.get<EDAJob>(`/eda/${job.id}`);
+        const response = await api.get<EDAJob>(`/eda/jobs/${job.id}`);
         setJob(response.data);
         onUpdate?.(response.data);
         if (response.data.status === "completed" || response.data.status === "failed") {
@@ -79,26 +71,21 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
 
   const currentStepIndex = getStepIndex(job.status);
 
-  const handleDownload = async (type: "dataset" | "notebook" | "report" | "cleaned" | "all") => {
-    const urlMap = {
-      dataset: job.file_url,
-      notebook: job.notebook_url,
-      report: job.report_url,
-      cleaned: job.cleaned_data_url,
-      all: job.zip_url,
-    };
-    const url = urlMap[type];
+  const handleDownload = async (type: "notebook" | "report" | "cleaned" | "all") => {
+    const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    let url: string | null = null;
+    if (type === "all" || type === "notebook") {
+      url = `${BASE}/eda/jobs/${job.id}/download`;
+    } else if (type === "report") {
+      url = job.docx_path ? `${BASE}${job.docx_path}` : null;
+    } else if (type === "cleaned") {
+      url = job.cleaned_csv_path ? `${BASE}${job.cleaned_csv_path}` : null;
+    }
     if (!url) {
       toast.error("File not available yet.");
       return;
     }
-    try {
-      const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const fullUrl = url.startsWith("http") ? url : `${BASE}${url}`;
-      window.open(fullUrl, "_blank");
-    } catch {
-      toast.error("Download failed.");
-    }
+    window.open(url, "_blank");
   };
 
   return (
@@ -163,45 +150,13 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
           <div className="h-2 rounded-full bg-[var(--border)] overflow-hidden">
             <motion.div
               className="h-full rounded-full bg-gradient-to-r from-[var(--primary)] to-[var(--accent)]"
-              animate={{ width: `${job.progress}%` }}
+              animate={{ width: `${getProgress(job.status)}%` }}
               transition={{ duration: 0.5 }}
             />
           </div>
-          <p className="text-xs text-[var(--text-muted)] text-right">{job.progress}% complete</p>
+          <p className="text-xs text-[var(--text-muted)] text-right">{getProgress(job.status)}% complete</p>
         </CardContent>
       </Card>
-
-      {/* Stats preview */}
-      {(job.row_count || job.column_count) && (
-        <div className="grid grid-cols-2 gap-3">
-          {job.row_count && (
-            <Card>
-              <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
-                  <Hash className="h-5 w-5 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-[var(--text)]">{job.row_count.toLocaleString()}</p>
-                  <p className="text-xs text-[var(--text-muted)]">Rows</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          {job.column_count && (
-            <Card>
-              <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10">
-                  <Columns className="h-5 w-5 text-purple-500" />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-[var(--text)]">{job.column_count}</p>
-                  <p className="text-xs text-[var(--text-muted)]">Columns</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
 
       {/* Downloads */}
       {job.status === "completed" && (
@@ -212,17 +167,8 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
               <Button
                 variant="secondary"
                 className="flex-col h-auto py-3 gap-1.5"
-                onClick={() => handleDownload("dataset")}
-                disabled={!job.file_url}
-              >
-                <Table2 className="h-5 w-5 text-green-500" />
-                <span className="text-xs">Dataset (CSV)</span>
-              </Button>
-              <Button
-                variant="secondary"
-                className="flex-col h-auto py-3 gap-1.5"
                 onClick={() => handleDownload("notebook")}
-                disabled={!job.notebook_url}
+                disabled={!job.notebook_path}
               >
                 <BookOpen className="h-5 w-5 text-orange-500" />
                 <span className="text-xs">Notebook (ipynb)</span>
@@ -231,7 +177,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
                 variant="secondary"
                 className="flex-col h-auto py-3 gap-1.5"
                 onClick={() => handleDownload("report")}
-                disabled={!job.report_url}
+                disabled={!job.docx_path}
               >
                 <FileBarChart className="h-5 w-5 text-blue-500" />
                 <span className="text-xs">Report (docx)</span>
@@ -240,7 +186,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
                 variant="secondary"
                 className="flex-col h-auto py-3 gap-1.5"
                 onClick={() => handleDownload("cleaned")}
-                disabled={!job.cleaned_data_url}
+                disabled={!job.cleaned_csv_path}
               >
                 <FileText className="h-5 w-5 text-purple-500" />
                 <span className="text-xs">Cleaned Data</span>
@@ -248,7 +194,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
               <Button
                 className="flex-col h-auto py-3 gap-1.5 col-span-2 sm:col-span-1"
                 onClick={() => handleDownload("all")}
-                disabled={!job.zip_url}
+                disabled={!job.zip_path}
               >
                 <Archive className="h-5 w-5" />
                 <span className="text-xs">All (ZIP)</span>
