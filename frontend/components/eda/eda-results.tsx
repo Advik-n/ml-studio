@@ -71,14 +71,6 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
 
   const currentStepIndex = getStepIndex(job.status);
 
-  const buildUrl = (path: string | null | undefined) => {
-    if (!path) return null;
-    if (path.startsWith("http")) return path;
-    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
-    const cleanPath = path.replace(/^\.?\//, "");
-    return `${BASE}/${cleanPath}`;
-  };
-
   const downloadBlob = async (url: string, filename: string) => {
     try {
       const res = await api.get(url, { responseType: "blob" });
@@ -95,22 +87,21 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
   };
 
   const handleDownload = async (type: "notebook" | "report" | "cleaned" | "all") => {
-    let url: string | null = null;
-    let filename = "";
-    if (type === "all" || type === "notebook") {
-      url = buildUrl(`/eda/jobs/${job.id}/download`);
-      filename = `eda_${job.id}.zip`;
-    } else if (type === "report") {
-      url = buildUrl(job.docx_path);
-      filename = "eda_report.docx";
-    } else if (type === "cleaned") {
-      url = buildUrl(job.cleaned_csv_path);
-      filename = "cleaned_data.csv";
-    }
-    if (!url) {
-      toast.error("File not available yet.");
-      return;
-    }
+    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+    const urlMap = {
+      all: `${BASE}/eda/jobs/${job.id}/files/zip`,
+      notebook: `${BASE}/eda/jobs/${job.id}/files/notebook`,
+      report: `${BASE}/eda/jobs/${job.id}/files/docx`,
+      cleaned: `${BASE}/eda/jobs/${job.id}/files/cleaned`,
+    } as const;
+    const filenameMap = {
+      all: `eda_${job.id}.zip`,
+      notebook: "eda_report.ipynb",
+      report: "eda_report.docx",
+      cleaned: "cleaned_data.csv",
+    } as const;
+    const url = urlMap[type];
+    const filename = filenameMap[type];
     await downloadBlob(url, filename);
   };
 

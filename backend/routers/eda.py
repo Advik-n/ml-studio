@@ -165,3 +165,45 @@ def download_eda_output(
 
     media_type = "application/zip" if download_path.endswith(".zip") else "application/octet-stream"
     return FileResponse(download_path, media_type=media_type, filename=os.path.basename(download_path))
+
+
+@router.get("/jobs/{job_id}/files/{kind}")
+def download_eda_file(
+    job_id: str,
+    kind: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download a specific EDA artifact."""
+    job = db.query(EDAJob).filter(EDAJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EDA job not found.")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+    if job.status != "completed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job not completed yet.")
+
+    path_map = {
+        "zip": job.zip_path or job.notebook_path,
+        "docx": job.docx_path,
+        "cleaned": job.cleaned_csv_path,
+        "notebook": job.notebook_path,
+    }
+    download_path = path_map.get(kind)
+    if not download_path or not os.path.exists(download_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested file not found.")
+
+    media_types = {
+        "zip": "application/zip",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "cleaned": "text/csv",
+        "notebook": "application/octet-stream",
+    }
+    return FileResponse(
+        download_path,
+        media_type=media_types.get(kind, "application/octet-stream"),
+        filename=os.path.basename(download_path),
+    )

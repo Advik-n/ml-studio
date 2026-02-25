@@ -72,13 +72,16 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
     cleaned_df = _clean_dataframe(df)
     cleaned_df.to_csv(cleaned_csv_path, index=False)
 
-    # Zip if total folder size exceeds 50 MB
-    zip_path: Optional[str] = None
-    folder_size = sum(
-        f.stat().st_size for f in Path(output_folder).rglob("*") if f.is_file()
+    # Always bundle key artifacts into a zip for easy download
+    zip_path = _zip_artifacts(
+        output_folder,
+        {
+            "eda_report.ipynb": notebook_path,
+            "eda_report.docx": docx_path,
+            "cleaned_data.csv": cleaned_csv_path,
+            os.path.basename(dest_file): dest_file,
+        },
     )
-    if folder_size > 50 * 1024 * 1024:
-        zip_path = _zip_folder(output_folder)
 
     return {
         "output_folder": output_folder,
@@ -683,14 +686,12 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # Zip helper
 # ---------------------------------------------------------------------------
 
-def _zip_folder(folder_path: str) -> str:
-    """Zip *folder_path* and return the path to the created zip file."""
-    zip_path = folder_path.rstrip("/").rstrip("\\") + ".zip"
+def _zip_artifacts(base_folder: str, files: Dict[str, str]) -> str:
+    """Zip selected files into base_folder + '.zip' using provided arc names."""
+    zip_path = base_folder.rstrip("/").rstrip("\\") + ".zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(folder_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, os.path.dirname(folder_path))
-                zf.write(file_path, arcname)
-    logger.info("Folder zipped to %s", zip_path)
+        for arcname, src in files.items():
+            if src and os.path.exists(src):
+                zf.write(src, arcname)
+    logger.info("Artifacts zipped to %s", zip_path)
     return zip_path
