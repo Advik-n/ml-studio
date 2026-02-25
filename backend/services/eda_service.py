@@ -52,8 +52,9 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
     output_folder = os.path.join(project_folder, f"eda_{job_id}")
     os.makedirs(output_folder, exist_ok=True)
 
-    # Copy raw input into output folder so the notebook can reference it
-    dest_file = os.path.join(output_folder, os.path.basename(file_path))
+    # Copy raw input into output folder so the notebook can reference it via local relative path
+    data_file_name = os.path.basename(file_path)
+    dest_file = os.path.join(output_folder, data_file_name)
     if not os.path.exists(dest_file):
         shutil.copy2(file_path, dest_file)
 
@@ -62,7 +63,7 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
     findings = _generate_findings(df, stats_dict)
 
     notebook_path = os.path.join(output_folder, "eda_report.ipynb")
-    _build_notebook(df, dest_file, output_folder, notebook_path, stats_dict, findings)
+    _build_notebook(df, data_file_name, output_folder, notebook_path, stats_dict, findings)
     _execute_notebook(notebook_path)
 
     docx_path = os.path.join(output_folder, "eda_report.docx")
@@ -239,7 +240,7 @@ def _generate_findings(df: pd.DataFrame, stats: Dict[str, Any]) -> List[str]:
 
 def _build_notebook(
     df: pd.DataFrame,
-    data_file: str,
+    data_file_name: str,
     output_folder: str,
     notebook_path: str,
     stats: Dict[str, Any],
@@ -247,7 +248,7 @@ def _build_notebook(
 ) -> None:
     """Build and write a comprehensive EDA notebook to *notebook_path*."""
     cells = []
-    fname = os.path.basename(data_file)
+    fname = data_file_name
 
     # ---- Section 1: Setup & Data Loading ----
     cells.append(new_markdown_cell("# 📊 EDA Report\n## Section 1 — Setup & Data Loading"))
@@ -263,10 +264,21 @@ def _build_notebook(
         "from scipy import stats\n"
         "from sklearn.decomposition import PCA\n"
         "from sklearn.preprocessing import StandardScaler\n"
+        "from pathlib import Path\n"
         "import os\n\n"
         "sns.set_theme(style='whitegrid')\n"
         "%matplotlib inline\n"
-        f"df = pd.read_csv(r'{data_file}') if r'{data_file}'.endswith('.csv') else pd.read_excel(r'{data_file}')\n"
+        f"data_file = Path(__file__).parent / '{data_file_name}'\n"
+        "if data_file.suffix.lower() == '.csv':\n"
+        "    df = pd.read_csv(data_file)\n"
+        "elif data_file.suffix.lower() == '.tsv':\n"
+        "    df = pd.read_csv(data_file, sep='\\t')\n"
+        "elif data_file.suffix.lower() in ['.xls', '.xlsx']:\n"
+        "    df = pd.read_excel(data_file)\n"
+        "elif data_file.suffix.lower() == '.json':\n"
+        "    df = pd.read_json(data_file)\n"
+        "else:\n"
+        "    df = pd.read_csv(data_file)\n"
         "print('Shape:', df.shape)\n"
         "print('\\nData Types:\\n', df.dtypes)\n"
         "df.head()"
@@ -687,11 +699,11 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def _zip_artifacts(base_folder: str, files: Dict[str, str]) -> str:
-    """Zip selected files into base_folder + '.zip' using provided arc names."""
+    """Zip selected files into base_folder + '.zip' using provided arc names (flattened)."""
     zip_path = base_folder.rstrip("/").rstrip("\\") + ".zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for arcname, src in files.items():
             if src and os.path.exists(src):
-                zf.write(src, arcname)
+                zf.write(src, os.path.basename(arcname))
     logger.info("Artifacts zipped to %s", zip_path)
     return zip_path
