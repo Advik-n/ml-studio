@@ -79,20 +79,39 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
     return `${BASE}/${cleanPath}`;
   };
 
-  const handleDownload = (type: "notebook" | "report" | "cleaned" | "all") => {
+  const downloadBlob = async (url: string, filename: string) => {
+    try {
+      const res = await api.get(url, { responseType: "blob" });
+      const blob = new Blob([res.data]);
+      const link = document.createElement("a");
+      link.href = window.URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(link.href);
+    } catch (err) {
+      toast.error("Download failed.");
+      console.error(err);
+    }
+  };
+
+  const handleDownload = async (type: "notebook" | "report" | "cleaned" | "all") => {
     let url: string | null = null;
+    let filename = "";
     if (type === "all" || type === "notebook") {
       url = buildUrl(`/eda/jobs/${job.id}/download`);
+      filename = `eda_${job.id}.zip`;
     } else if (type === "report") {
       url = buildUrl(job.docx_path);
+      filename = "eda_report.docx";
     } else if (type === "cleaned") {
       url = buildUrl(job.cleaned_csv_path);
+      filename = "cleaned_data.csv";
     }
     if (!url) {
       toast.error("File not available yet.");
       return;
     }
-    window.open(url, "_blank");
+    await downloadBlob(url, filename);
   };
 
   return (

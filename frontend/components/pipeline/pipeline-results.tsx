@@ -48,10 +48,25 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
     return () => clearInterval(interval);
   }, [job.id, job.status, onUpdate]);
 
-  const handleDownloadNotebook = () => {
+  const downloadBlob = async (url: string, filename: string) => {
+    try {
+      const res = await api.get(url, { responseType: "blob" });
+      const blob = new Blob([res.data]);
+      const link = document.createElement("a");
+      link.href = window.URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(link.href);
+    } catch (err) {
+      toast.error("Download failed.");
+      console.error(err);
+    }
+  };
+
+  const handleDownloadNotebook = async () => {
     if (!job.notebook_path) { toast.error("Notebook not available."); return; }
     const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
-    window.open(`${BASE}/pipeline/jobs/${job.id}/download-notebook`, "_blank");
+    await downloadBlob(`${BASE}/pipeline/jobs/${job.id}/download-notebook`, `pipeline_${job.id}.ipynb`);
   };
 
   const parsedMetrics = job.metrics ? JSON.parse(job.metrics) : null;

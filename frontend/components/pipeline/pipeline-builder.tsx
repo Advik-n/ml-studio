@@ -133,7 +133,14 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { "text/csv": [".csv"] },
+    accept: {
+      "text/csv": [".csv", ".tsv"],
+      "application/vnd.ms-excel": [".xls"],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+      "application/json": [".json"],
+      "application/octet-stream": [".parquet"],
+      "application/x-parquet": [".parquet"],
+    },
     maxFiles: 1,
   });
 
@@ -262,29 +269,42 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
               {/* ── Step 1: Dataset ── */}
               {currentStep === 1 && (
                 <div className="space-y-4">
-                  <div
-                    {...getRootProps()}
-                    className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
-                      isDragActive ? "border-blue-500 bg-blue-500/5" : "border-[var(--border)] hover:border-blue-400"
-                    }`}
-                  >
-                    <input {...getInputProps()} />
-                    <Upload className="h-8 w-8 mx-auto mb-2 text-blue-400" />
-                    <p className="text-sm font-medium text-[var(--text)]">
-                      {isDragActive ? "Drop CSV here" : "Upload your dataset (CSV)"}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] mt-1">Drag & drop or click to browse</p>
-                  </div>
-                  {datasetFile && (
-                    <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
-                      <FileText className="h-5 w-5 text-blue-400 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--text)] truncate">{datasetFile.name}</p>
-                        <p className="text-xs text-[var(--text-muted)]">{formatFileSize(datasetFile.size)} · {columns.length} columns detected</p>
-                      </div>
-                      <Check className="h-4 w-4 text-emerald-500 shrink-0" />
-                    </div>
-                  )}
+                   <div
+                     {...getRootProps()}
+                     className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
+                       isDragActive ? "border-blue-500 bg-blue-500/5" : "border-[var(--border)] hover:border-blue-400"
+                     }`}
+                   >
+                     <input {...getInputProps()} />
+                     <Upload className="h-8 w-8 mx-auto mb-2 text-blue-400" />
+                     <p className="text-sm font-medium text-[var(--text)]">
+                       {isDragActive ? "Drop dataset here" : "Upload your dataset (.csv, .tsv, .xls, .xlsx, .json, .parquet)"}
+                     </p>
+                     <p className="text-xs text-[var(--text-muted)] mt-1">Drag & drop or click to browse</p>
+                   </div>
+                   {datasetFile && (
+                     <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                       <FileText className="h-5 w-5 text-blue-400 shrink-0" />
+                       <div className="min-w-0">
+                         <p className="text-sm font-medium text-[var(--text)] truncate">{datasetFile.name}</p>
+                         <p className="text-xs text-[var(--text-muted)]">{formatFileSize(datasetFile.size)} · {columns.length} columns detected</p>
+                       </div>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         onClick={() => {
+                           setDatasetFile(null);
+                           setDatasetFilename("");
+                           setColumns([]);
+                           setFeatureColumns([]);
+                           setTargetColumns([]);
+                         }}
+                       >
+                         <span className="text-sm">✕</span>
+                       </Button>
+                       <Check className="h-4 w-4 text-emerald-500 shrink-0" />
+                     </div>
+                   )}
                 </div>
               )}
 
@@ -391,9 +411,9 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
               {/* ── Step 6: Features & Target ── */}
               {currentStep === 6 && (
                 <div className="space-y-4">
-                  {columns.length === 0 && (
-                    <p className="text-sm text-[var(--text-muted)]">No columns detected. Please upload a CSV file in Step 1.</p>
-                  )}
+                   {columns.length === 0 && (
+                     <p className="text-sm text-[var(--text-muted)]">No columns detected. Please upload a dataset in Step 1.</p>
+                   )}
                   {columns.length > 0 && (
                     <>
                       <div>

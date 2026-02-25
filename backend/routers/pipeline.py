@@ -53,6 +53,7 @@ async def _run_pipeline_job(
         job.status = "completed"
         job.model_path = result["model_path"]
         job.notebook_path = result["notebook_path"]
+        job.model_type = result.get("model_type", job.model_type)
         job.accuracy = result.get("accuracy")
         job.metrics = result.get("metrics")
         job.completed_at = datetime.utcnow()

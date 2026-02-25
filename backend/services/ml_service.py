@@ -161,6 +161,16 @@ async def build_and_run_pipeline(
     else:
         y = None
 
+    # Auto-correct regression with categorical targets to classification
+    if model_type == "regression" and y is not None:
+        def _is_numeric(series: pd.Series) -> bool:
+            return pd.api.types.is_numeric_dtype(series)
+        if (multi_target and isinstance(y, pd.DataFrame) and any(not _is_numeric(y[col]) for col in y.columns)) or (
+            not multi_target and not _is_numeric(y)
+        ):
+            logger.info("Detected non-numeric target for regression; switching to classification.")
+            model_type = "classification"
+
     # Build preprocessing pipeline
     pipeline, label_encoder = _build_preprocessing_pipeline(X, transformer_names, model_type)
 
@@ -288,6 +298,7 @@ async def build_and_run_pipeline(
         "accuracy": accuracy,
         "metrics": json.dumps(metrics),
         "status": "completed",
+        "model_type": model_type,
     }
 
 
