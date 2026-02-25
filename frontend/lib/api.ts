@@ -27,6 +27,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && typeof window !== "undefined") {
       localStorage.removeItem("access_token");
+      document.cookie = "access_token=; path=/; max-age=0; SameSite=Lax";
       window.location.href = "/login";
     }
     return Promise.reject(error);
