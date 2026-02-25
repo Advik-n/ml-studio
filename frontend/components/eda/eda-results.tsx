@@ -71,15 +71,22 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
 
   const currentStepIndex = getStepIndex(job.status);
 
-  const handleDownload = async (type: "notebook" | "report" | "cleaned" | "all") => {
-    const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const buildUrl = (path: string | null | undefined) => {
+    if (!path) return null;
+    if (path.startsWith("http")) return path;
+    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+    const cleanPath = path.replace(/^\.?\//, "");
+    return `${BASE}/${cleanPath}`;
+  };
+
+  const handleDownload = (type: "notebook" | "report" | "cleaned" | "all") => {
     let url: string | null = null;
     if (type === "all" || type === "notebook") {
-      url = `${BASE}/eda/jobs/${job.id}/download`;
+      url = buildUrl(`/eda/jobs/${job.id}/download`);
     } else if (type === "report") {
-      url = job.docx_path ? `${BASE}${job.docx_path}` : null;
+      url = buildUrl(job.docx_path);
     } else if (type === "cleaned") {
-      url = job.cleaned_csv_path ? `${BASE}${job.cleaned_csv_path}` : null;
+      url = buildUrl(job.cleaned_csv_path);
     }
     if (!url) {
       toast.error("File not available yet.");
@@ -194,7 +201,6 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
               <Button
                 className="flex-col h-auto py-3 gap-1.5 col-span-2 sm:col-span-1"
                 onClick={() => handleDownload("all")}
-                disabled={!job.zip_path}
               >
                 <Archive className="h-5 w-5" />
                 <span className="text-xs">All (ZIP)</span>

@@ -16,9 +16,10 @@ import {
 interface SidebarProps {
   projectId: string;
   projectName: string;
+  projectType?: "eda" | "pipeline" | "mixed";
 }
 
-export default function Sidebar({ projectId, projectName }: SidebarProps) {
+export default function Sidebar({ projectId, projectName, projectType = "mixed" }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -28,18 +29,21 @@ export default function Sidebar({ projectId, projectName }: SidebarProps) {
       label: "Overview",
       icon: <LayoutGrid className="h-4 w-4 shrink-0" />,
       exact: true,
+      show: true,
     },
     {
       href: `/projects/${projectId}/eda`,
       label: "EDA",
       icon: <BarChart2 className="h-4 w-4 shrink-0" />,
+      show: projectType === "eda" || projectType === "mixed",
     },
     {
       href: `/projects/${projectId}/pipeline`,
       label: "ML Pipeline",
       icon: <GitBranch className="h-4 w-4 shrink-0" />,
+      show: projectType === "pipeline" || projectType === "mixed",
     },
-  ];
+  ].filter((l) => l.show);
 
   return (
     <motion.aside

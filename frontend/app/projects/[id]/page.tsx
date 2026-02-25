@@ -63,7 +63,7 @@ export default function ProjectPage() {
     <div className="min-h-screen bg-[var(--bg)]">
       <Navbar userName={user?.name || user?.username} />
       <div className="flex">
-        <Sidebar projectId={id} projectName={project.name} />
+        <Sidebar projectId={id} projectName={project.name} projectType={project.project_type as "eda" | "pipeline" | "mixed"} />
         <main className="flex-1 p-6 max-w-4xl">
           {/* Back + Header */}
           <div className="mb-6">
