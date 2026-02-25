@@ -1,6 +1,6 @@
 """Pydantic schemas for pipeline jobs."""
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,7 +13,7 @@ class PipelineConfig(BaseModel):
     model_name: str
     transformers: List[str] = []
     test_size: float = 0.2
-    target_column: Optional[str] = None
+    target_column: Optional[Union[str, List[str]]] = None
     feature_columns: Optional[List[str]] = None
     hyperparams: Optional[Dict[str, Any]] = None
 
@@ -25,6 +25,12 @@ class PipelineJobResponse(BaseModel):
     project_id: str
     model_type: Optional[str]
     model_name: Optional[str]
+    dataset_filename: Optional[str]
+    transformers: Optional[str]
+    test_size: Optional[float]
+    target_column: Optional[str]
+    feature_columns: Optional[str]
+    hyperparams: Optional[str]
     status: str
     accuracy: Optional[float]
     metrics: Optional[str]

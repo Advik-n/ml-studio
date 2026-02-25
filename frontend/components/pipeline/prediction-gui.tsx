@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,27 @@ interface PredictionGUIProps {
 }
 
 export default function PredictionGUI({ job }: PredictionGUIProps) {
-  const featureCols: string[] = (job as any).config?.feature_columns ?? [];
+  const featureCols: string[] = React.useMemo(() => {
+    if ((job as any).config?.feature_columns) return (job as any).config.feature_columns;
+    if (!job.feature_columns) return [];
+    if (Array.isArray(job.feature_columns)) return job.feature_columns as string[];
+    try {
+      const parsed = JSON.parse(job.feature_columns);
+      if (Array.isArray(parsed)) return parsed;
+      if (typeof parsed === "string") return [parsed];
+    } catch {
+      /* ignore */
+    }
+    return typeof job.feature_columns === "string"
+      ? job.feature_columns.split(",").map((c) => c.trim()).filter(Boolean)
+      : [];
+  }, [job.feature_columns, job]);
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(featureCols.map((f) => [f, ""]))
   );
+  useEffect(() => {
+    setValues(Object.fromEntries(featureCols.map((f) => [f, ""])));
+  }, [featureCols]);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,9 +143,15 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
                 {/* Main prediction */}
                 <div className="text-center">
                   <p className="text-xs text-[var(--text-muted)] mb-1">Predicted Value</p>
-                  <p className="text-4xl font-bold text-[var(--primary)]">
-                    {String(result.prediction)}
-                  </p>
+          {typeof result.prediction === "object" ? (
+            <pre className="text-xs text-left whitespace-pre-wrap bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3">
+              {JSON.stringify(result.prediction, null, 2)}
+            </pre>
+          ) : (
+            <p className="text-4xl font-bold text-[var(--primary)]">
+              {String(result.prediction)}
+            </p>
+          )}
                 </div>
 
                 {/* Confidence */}

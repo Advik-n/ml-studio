@@ -42,6 +42,12 @@ export interface PipelineJob {
   project_id: string;
   model_type: string | null;
   model_name: string | null;
+  dataset_filename?: string | null;
+  transformers?: string | null;
+  test_size?: number | null;
+  target_column?: string | string[] | null;
+  feature_columns?: string | string[] | null;
+  hyperparams?: string | null;
   status: PipelineJobStatus;
   accuracy: number | null;
   metrics: string | null; // JSON string from backend
@@ -59,7 +65,7 @@ export interface PipelineConfig {
   model_name: string;
   transformers: string[];
   test_size: number;
-  target_column?: string;
+  target_column?: string | string[];
   feature_columns?: string[];
   hyperparams?: Record<string, string | number | boolean>;
 }
@@ -89,7 +95,7 @@ export interface PredictRequest {
 }
 
 export interface PredictResponse {
-  prediction: string | number;
+  prediction: string | number | Record<string, unknown> | Array<unknown>;
   confidence?: number;
   probabilities?: Record<string, number>;
 }

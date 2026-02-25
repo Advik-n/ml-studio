@@ -49,6 +49,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
     LabelEncoder,
@@ -131,7 +132,15 @@ async def build_and_run_pipeline(
     df = _read_dataset(dataset_path)
     model_type: str = config.get("model_type", "classification")
     model_name: str = config.get("model_name", "RandomForest")
-    target_col: Optional[str] = config.get("target_column")
+    target_raw = config.get("target_column")
+    target_cols: List[str] = []
+    if isinstance(target_raw, list):
+        target_cols = [c for c in target_raw if c]
+    elif target_raw:
+        target_cols = [target_raw]
+    target_col: Optional[str] = target_cols[0] if target_cols else None
+    multi_target = len(target_cols) > 1
+
     feature_cols: Optional[List[str]] = config.get("feature_columns")
     test_size: float = float(config.get("test_size", 0.2))
     transformer_names: List[str] = config.get("transformers", [])
@@ -140,14 +149,15 @@ async def build_and_run_pipeline(
     # Resolve feature and target columns
     if feature_cols:
         X = df[feature_cols]
-    elif target_col:
-        X = df.drop(columns=[target_col])
+    elif target_cols:
+        X = df.drop(columns=target_cols)
     else:
         X = df.iloc[:, :-1]
-        target_col = df.columns[-1]
+        target_cols = [df.columns[-1]]
+        target_col = target_cols[0]
 
-    if target_col and target_col in df.columns:
-        y = df[target_col]
+    if target_cols and all(col in df.columns for col in target_cols):
+        y = df[target_cols] if multi_target else df[target_col]
     else:
         y = None
 
@@ -155,17 +165,29 @@ async def build_and_run_pipeline(
     pipeline, label_encoder = _build_preprocessing_pipeline(X, transformer_names, model_type)
 
     # Encode target for classification if needed
+    le: Any = None
     if y is not None and model_type == "classification":
-        if y.dtype == object or str(y.dtype) == "category":
-            le = LabelEncoder()
-            y = pd.Series(le.fit_transform(y), name=target_col)
-        else:
-            le = None
-    else:
-        le = None
+        if multi_target and isinstance(y, pd.DataFrame):
+            encoders: Dict[str, LabelEncoder] = {}
+            for col in target_cols:
+                series = y[col]
+                if series.dtype == object or str(series.dtype) == "category":
+                    enc = LabelEncoder()
+                    y[col] = enc.fit_transform(series)
+                    encoders[col] = enc
+            le = encoders or None
+        elif hasattr(y, "dtype") and (y.dtype == object or str(y.dtype) == "category"):
+            enc = LabelEncoder()
+            y = pd.Series(enc.fit_transform(y), name=target_col)
+            le = enc
 
     # Attach the estimator
     estimator = _get_estimator(model_type, model_name, hyperparams)
+    if multi_target:
+        if model_type == "classification":
+            estimator = MultiOutputClassifier(estimator)
+        elif model_type == "regression":
+            estimator = MultiOutputRegressor(estimator)
     pipeline.steps.append(("model", estimator))
 
     # Train / evaluate
@@ -189,26 +211,62 @@ async def build_and_run_pipeline(
         y_pred = pipeline.predict(X_test)
 
         if model_type == "classification":
-            accuracy = round(float(accuracy_score(y_test, y_pred)), 4)
-            metrics = {
-                "accuracy": accuracy,
-                "f1_weighted": round(float(f1_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-                "precision_weighted": round(float(precision_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-                "recall_weighted": round(float(recall_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
-            }
+            if multi_target and isinstance(y_test, pd.DataFrame):
+                accs = []
+                per_target = {}
+                for idx, col in enumerate(target_cols):
+                    acc = accuracy_score(y_test.iloc[:, idx], y_pred[:, idx])
+                    accs.append(acc)
+                    per_target[f"accuracy_{col}"] = round(float(acc), 4)
+                accuracy = round(float(np.mean(accs)), 4)
+                metrics = {"accuracy": accuracy, **per_target}
+            else:
+                accuracy = round(float(accuracy_score(y_test, y_pred)), 4)
+                metrics = {
+                    "accuracy": accuracy,
+                    "f1_weighted": round(float(f1_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
+                    "precision_weighted": round(float(precision_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
+                    "recall_weighted": round(float(recall_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
+                }
         elif model_type == "regression":
-            rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-            r2 = float(r2_score(y_test, y_pred))
-            accuracy = round(max(0.0, r2), 4)  # use R² as primary metric
-            metrics = {
-                "r2": round(r2, 4),
-                "rmse": round(rmse, 4),
-                "mae": round(float(mean_absolute_error(y_test, y_pred)), 4),
-            }
+            if multi_target and isinstance(y_test, pd.DataFrame):
+                rmses = []
+                maes = []
+                r2s = []
+                for idx, col in enumerate(target_cols):
+                    rmse = float(np.sqrt(mean_squared_error(y_test.iloc[:, idx], y_pred[:, idx])))
+                    mae = float(mean_absolute_error(y_test.iloc[:, idx], y_pred[:, idx]))
+                    r2 = float(r2_score(y_test.iloc[:, idx], y_pred[:, idx]))
+                    rmses.append(rmse)
+                    maes.append(mae)
+                    r2s.append(r2)
+                accuracy = round(float(np.mean(r2s)), 4)
+                metrics = {
+                    "r2": round(float(np.mean(r2s)), 4),
+                    "rmse": round(float(np.mean(rmses)), 4),
+                    "mae": round(float(np.mean(maes)), 4),
+                }
+            else:
+                rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+                r2 = float(r2_score(y_test, y_pred))
+                accuracy = round(max(0.0, r2), 4)  # use R² as primary metric
+                metrics = {
+                    "r2": round(r2, 4),
+                    "rmse": round(rmse, 4),
+                    "mae": round(float(mean_absolute_error(y_test, y_pred)), 4),
+                }
 
     # Save model + label encoder
     model_path = os.path.join(output_folder, "model.joblib")
-    joblib.dump({"pipeline": pipeline, "label_encoder": le}, model_path)
+    joblib.dump(
+        {
+            "pipeline": pipeline,
+            "label_encoder": le,
+            "target_columns": target_cols,
+            "feature_columns": list(X.columns),
+        },
+        model_path,
+    )
     logger.info("Model saved to %s", model_path)
 
     # Build notebook
@@ -220,7 +278,7 @@ async def build_and_run_pipeline(
         config=config,
         metrics=metrics,
         feature_cols=list(X.columns),
-        target_col=target_col,
+        target_cols=target_cols,
     )
     _execute_notebook(notebook_path)
 
@@ -252,23 +310,58 @@ def predict(
     """
     artifact = joblib.load(model_path)
     pipeline = artifact["pipeline"]
-    le: Optional[LabelEncoder] = artifact.get("label_encoder")
+    le = artifact.get("label_encoder")
+    target_cols: List[str] = artifact.get("target_columns") or []
+    feature_columns = feature_columns or artifact.get("feature_columns")
 
     input_df = pd.DataFrame([features_dict])
+
+    pre = pipeline.named_steps.get("preprocessor")
+    num_cols, cat_cols = set(), set()
+    if isinstance(pre, ColumnTransformer):
+        for name, transformer, cols in pre.transformers:
+            cols_list = list(cols) if isinstance(cols, (list, tuple, np.ndarray)) else list(cols) if cols else []
+            if transformer is None:
+                continue
+            if name == "num" or isinstance(transformer, (StandardScaler, MinMaxScaler)):
+                num_cols.update(cols_list)
+            elif name == "cat" or isinstance(transformer, OneHotEncoder):
+                cat_cols.update(cols_list)
 
     if feature_columns:
         for col in feature_columns:
             if col not in input_df.columns:
-                input_df[col] = 0
+                input_df[col] = "" if col in cat_cols else 0
         input_df = input_df[feature_columns]
 
-    prediction_raw = pipeline.predict(input_df)[0]
-    prediction = le.inverse_transform([int(prediction_raw)])[0] if le else prediction_raw
+    for col in num_cols:
+        if col in input_df.columns:
+            input_df[col] = pd.to_numeric(input_df[col], errors="coerce")
+    if num_cols:
+        input_df[list(num_cols)] = input_df[list(num_cols)].fillna(0)
+    if cat_cols:
+        for col in cat_cols:
+            if col in input_df.columns:
+                input_df[col] = input_df[col].fillna("")
+
+    prediction_raw = pipeline.predict(input_df)
+    raw_item = prediction_raw[0] if hasattr(prediction_raw, "__len__") else prediction_raw
+
+    prediction: Any
+    if isinstance(le, dict):
+        decoded: Dict[str, Any] = {}
+        for idx, col in enumerate(target_cols[: len(raw_item) if hasattr(raw_item, "__len__") else 1]):
+            val = raw_item[idx] if hasattr(raw_item, "__len__") else raw_item
+            enc = le.get(col) if isinstance(le, dict) else None
+            decoded[col] = enc.inverse_transform([int(val)])[0] if enc else val
+        prediction = decoded
+    else:
+        prediction = le.inverse_transform([int(raw_item)])[0] if le else raw_item
 
     confidence: Optional[float] = None
     probabilities: Optional[Dict[str, float]] = None
 
-    if model_type == "classification" and hasattr(pipeline, "predict_proba"):
+    if model_type == "classification" and not isinstance(prediction, dict) and hasattr(pipeline, "predict_proba"):
         try:
             proba = pipeline.predict_proba(input_df)[0]
             confidence = round(float(proba.max()), 4)
@@ -277,11 +370,12 @@ def predict(
         except Exception:
             pass
 
-    return {
-        "prediction": str(prediction) if not isinstance(prediction, (int, float)) else prediction,
-        "confidence": confidence,
-        "probabilities": probabilities,
-    }
+    if isinstance(prediction, np.generic):
+        prediction = prediction.item()
+    elif not isinstance(prediction, (int, float, str, dict, list)):
+        prediction = str(prediction)
+
+    return {"prediction": prediction, "confidence": confidence, "probabilities": probabilities}
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +488,7 @@ def _build_pipeline_notebook(
     config: Dict[str, Any],
     metrics: Dict[str, Any],
     feature_cols: List[str],
-    target_col: Optional[str],
+    target_cols: List[str],
 ) -> None:
     """Build and write a pipeline report notebook."""
     cells = []
@@ -402,11 +496,12 @@ def _build_pipeline_notebook(
     model_name = config.get("model_name", "Model")
     test_size = config.get("test_size", 0.2)
 
+    target_label = ", ".join(target_cols) if target_cols else "None"
     cells.append(new_markdown_cell(
         f"# 🤖 ML Pipeline Report\n\n"
         f"**Model:** {model_name}  \n"
         f"**Type:** {model_type}  \n"
-        f"**Target:** {target_col}  \n"
+        f"**Target:** {target_label}  \n"
         f"**Test size:** {test_size}"
     ))
 
@@ -430,13 +525,18 @@ def _build_pipeline_notebook(
 
     cells.append(new_markdown_cell("## Feature & Target Selection"))
     feature_cols_repr = repr(feature_cols)
+    target_cols_repr = repr(target_cols)
     cells.append(new_code_cell(
         f"feature_cols = {feature_cols_repr}\n"
-        f"target_col = {repr(target_col)}\n"
-        "X = df[feature_cols] if feature_cols else df.drop(columns=[target_col])\n"
-        "y = df[target_col] if target_col else None\n"
+        f"target_cols = {target_cols_repr}\n"
+        "X = df[feature_cols] if feature_cols else df.drop(columns=target_cols or [])\n"
+        "y = df[target_cols] if target_cols else None\n"
         "print('X shape:', X.shape)\n"
-        "if y is not None: print('y value counts:\\n', y.value_counts().head(10) if hasattr(y, 'value_counts') else y.describe())"
+        "if y is not None:\n"
+        "    try:\n"
+        "        print('y value counts:\\n', y.value_counts().head(10))\n"
+        "    except Exception:\n"
+        "        print(y.describe())"
     ))
 
     cells.append(new_markdown_cell("## Preprocessing & Pipeline"))
@@ -495,19 +595,24 @@ def _build_pipeline_notebook(
         "    print(f'  {k}: {v}')"
     ))
 
-    if model_type == "classification" and target_col:
+    if model_type == "classification" and target_cols:
         cells.append(new_markdown_cell("## Confusion Matrix"))
         cells.append(new_code_cell(
             "if y is not None:\n"
             f"    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size={test_size}, random_state=42)\n"
-            "    if y.dtype == object:\n"
+            "    target_name = target_cols[0] if isinstance(target_cols, list) else target_cols\n"
+            "    y_train_single = y_train[target_name] if hasattr(y_train, 'columns') else y_train\n"
+            "    y_test_single = y_test[target_name] if hasattr(y_test, 'columns') else y_test\n"
+            "    if getattr(y_train_single, 'dtype', None) == object:\n"
             "        from sklearn.preprocessing import LabelEncoder\n"
             "        le = LabelEncoder()\n"
-            "        y_train_enc = le.fit_transform(y_train)\n"
-            "        y_test_enc = le.transform(y_test)\n"
+            "        y_train_enc = le.fit_transform(y_train_single)\n"
+            "        y_test_enc = le.transform(y_test_single)\n"
             "    else:\n"
-            "        y_train_enc, y_test_enc = y_train, y_test\n"
+            "        y_train_enc, y_test_enc = y_train_single, y_test_single\n"
             "    y_pred = pipeline.predict(X_test)\n"
+            "    if y_pred.ndim > 1:\n"
+            "        y_pred = y_pred[:, 0]\n"
             "    cm = confusion_matrix(y_test_enc, y_pred)\n"
             "    fig, ax = plt.subplots(figsize=(6, 5))\n"
             "    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)\n"
@@ -518,15 +623,17 @@ def _build_pipeline_notebook(
             "    plt.show(); plt.close()"
         ))
 
-    if model_type == "regression" and target_col:
+    if model_type == "regression" and target_cols:
         cells.append(new_markdown_cell("## Actual vs Predicted"))
         cells.append(new_code_cell(
             "if y is not None:\n"
             f"    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size={test_size}, random_state=42)\n"
             "    y_pred = pipeline.predict(X_test)\n"
             "    fig, ax = plt.subplots(figsize=(7, 5))\n"
-            "    ax.scatter(y_test, y_pred, alpha=0.4, s=20, c='steelblue')\n"
-            "    lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]\n"
+            "    y_true = y_test.iloc[:, 0] if hasattr(y_test, 'columns') else y_test\n"
+            "    y_pred_single = y_pred[:, 0] if y_pred.ndim > 1 else y_pred\n"
+            "    ax.scatter(y_true, y_pred_single, alpha=0.4, s=20, c='steelblue')\n"
+            "    lims = [min(y_true.min(), y_pred_single.min()), max(y_true.max(), y_pred_single.max())]\n"
             "    ax.plot(lims, lims, 'r--', linewidth=1)\n"
             "    ax.set_xlabel('Actual'); ax.set_ylabel('Predicted')\n"
             "    ax.set_title('Actual vs Predicted')\n"

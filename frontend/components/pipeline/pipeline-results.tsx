@@ -50,7 +50,7 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
 
   const handleDownloadNotebook = () => {
     if (!job.notebook_path) { toast.error("Notebook not available."); return; }
-    const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
     window.open(`${BASE}/pipeline/jobs/${job.id}/download-notebook`, "_blank");
   };
 

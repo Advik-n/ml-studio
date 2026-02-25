@@ -108,7 +108,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
   const [testSize, setTestSize] = useState(0.2);
   const [columns, setColumns] = useState<string[]>([]);
   const [featureColumns, setFeatureColumns] = useState<string[]>([]);
-  const [targetColumn, setTargetColumn] = useState<string>("");
+  const [targetColumns, setTargetColumns] = useState<string[]>([]);
   const [hyperparameters, setHyperparameters] = useState<Record<string, string | number | boolean>>({});
   const [datasetFilename, setDatasetFilename] = useState<string>("");
 
@@ -125,7 +125,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
         const cols = firstLine.split(",").map((c) => c.trim().replace(/"/g, ""));
         setColumns(cols);
         setFeatureColumns(cols.slice(0, -1));
-        setTargetColumn(cols[cols.length - 1]);
+        setTargetColumns(cols.length > 0 ? [cols[cols.length - 1]] : []);
       };
       reader.readAsText(acceptedFiles[0]);
     }
@@ -161,6 +161,12 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     );
   };
 
+  const toggleTarget = (col: string) => {
+    setTargetColumns((prev) =>
+      prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]
+    );
+  };
+
   // Init HP when model changes
   const handleModelChange = (model: string) => {
     setModelName(model);
@@ -179,7 +185,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
         model_type: taskType,
         model_name: modelName,
         feature_columns: featureColumns,
-        target_column: taskType !== "clustering" ? targetColumn : undefined,
+        target_column: taskType !== "clustering" ? targetColumns : undefined,
         test_size: testSize,
         transformers: selectedTransformers,
         hyperparams: hyperparameters,
@@ -412,17 +418,24 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                       </div>
                       {taskType !== "clustering" && (
                         <div>
-                          <p className="text-sm font-medium text-[var(--text)] mb-2">Target Column</p>
-                          <select
-                            value={targetColumn}
-                            onChange={(e) => setTargetColumn(e.target.value)}
-                            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-pink-500"
-                          >
-                            <option value="">Select target column...</option>
+                          <p className="text-sm font-medium text-[var(--text)] mb-2">Target Columns (select one or more)</p>
+                          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
                             {columns.map((col) => (
-                              <option key={col} value={col}>{col}</option>
+                              <button
+                                key={col}
+                                type="button"
+                                onClick={() => toggleTarget(col)}
+                                className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                                  targetColumns.includes(col)
+                                    ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"
+                                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-400"
+                                }`}
+                              >
+                                {targetColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
+                                {col}
+                              </button>
                             ))}
-                          </select>
+                          </div>
                         </div>
                       )}
                     </>
@@ -484,7 +497,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                       { label: "Transformers", value: selectedTransformers.length > 0 ? selectedTransformers.join(", ") : "None" },
                       { label: "Test Size", value: `${Math.round(testSize * 100)}%` },
                       { label: "Features", value: featureColumns.length > 0 ? `${featureColumns.length} selected` : "None" },
-                      { label: "Target", value: targetColumn || (taskType === "clustering" ? "N/A" : "Not set") },
+                      { label: "Target", value: targetColumns.length > 0 ? targetColumns.join(", ") : (taskType === "clustering" ? "N/A" : "Not set") },
                       { label: "Hyperparameters", value: Object.keys(hyperparameters).length > 0 ? `${Object.keys(hyperparameters).length} params` : "Default" },
                     ].map((item) => (
                       <div key={item.label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
@@ -499,12 +512,12 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                     size="lg"
                     isLoading={running}
                     onClick={handleRun}
-                    disabled={!modelName || (taskType !== "clustering" && !targetColumn) || !datasetFilename}
+                    disabled={!modelName || (taskType !== "clustering" && targetColumns.length === 0) || !datasetFilename}
                   >
                     <Play className="h-5 w-5" />
                     Run Pipeline
                   </Button>
-                  {(!modelName || (taskType !== "clustering" && !targetColumn) || !datasetFilename) && (
+                  {(!modelName || (taskType !== "clustering" && targetColumns.length === 0) || !datasetFilename) && (
                     <p className="text-xs text-red-500 text-center">Please complete all required steps before running.</p>
                   )}
                 </div>

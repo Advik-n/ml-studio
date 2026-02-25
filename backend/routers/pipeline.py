@@ -127,7 +127,7 @@ async def configure_and_run(
         model_name=config.model_name,
         transformers=json.dumps(config.transformers),
         test_size=config.test_size,
-        target_column=config.target_column,
+        target_column=json.dumps(config.target_column) if config.target_column is not None else None,
         feature_columns=json.dumps(config.feature_columns) if config.feature_columns else None,
         hyperparams=json.dumps(config.hyperparams) if config.hyperparams else None,
         status="pending",
