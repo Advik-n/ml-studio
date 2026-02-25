@@ -94,25 +94,26 @@ test.describe("Register page", () => {
     await page.goto("/register");
   });
 
-  test("renders registration form", async ({ page }) => {
+  test("renders first step fields", async ({ page }) => {
+    await expect(page.locator('input[name="name"]')).toBeVisible();
     await expect(page.locator('input[name="username"]')).toBeVisible();
     await expect(page.locator('input[name="email"]')).toBeVisible();
-    await expect(page.locator('input[name="full_name"]')).toBeVisible();
-    await expect(page.locator('input[name="password"]')).toBeVisible();
+    await expect(page.locator('button[type="submit"]')).toHaveText(/Continue/i);
   });
 
   test("shows validation errors for empty submission", async ({ page }) => {
     await page.click('button[type="submit"]');
-    await expect(page.locator("text=required").first()).toBeVisible();
+    await expect(page.locator("text=Full name must be at least 2 characters")).toBeVisible();
+    await expect(page.locator("text=Username must be at least 3 characters")).toBeVisible();
+    await expect(page.locator("text=Invalid email address")).toBeVisible();
   });
 
   test("shows error for invalid email format", async ({ page }) => {
+    await page.fill('input[name="name"]', "Test User");
+    await page.fill('input[name="username"]', "user123");
     await page.fill('input[name="email"]', "not-an-email");
-    await page.fill('input[name="username"]', "user");
-    await page.fill('input[name="full_name"]', "Test User");
-    await page.fill('input[name="password"]', "password123");
     await page.click('button[type="submit"]');
-    await expect(page.locator("text=Invalid email").first()).toBeVisible();
+    await expect(page.locator("text=Invalid email address").first()).toBeVisible();
   });
 
   test("link back to login page works", async ({ page }) => {

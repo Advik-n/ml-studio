@@ -33,10 +33,5 @@ def get_current_user(
 
 
 def require_verified_user(current_user: User = Depends(get_current_user)) -> User:
-    """Extends get_current_user — raises 403 if the email is not verified."""
-    if not current_user.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email address not verified. Please verify your email before proceeding.",
-        )
+    """Email verification disabled; simply ensure the user is authenticated."""
     return current_user

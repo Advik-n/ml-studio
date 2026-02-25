@@ -25,10 +25,6 @@ export async function register(data: RegisterRequest): Promise<User> {
   return response.data;
 }
 
-export async function verifyEmail(email: string, code: string): Promise<void> {
-  await api.post("/auth/verify-email", { email, code });
-}
-
 export function logout(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem("access_token");

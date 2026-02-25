@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, BarChart2, GitBranch, Layers, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ const types = [
 ];
 
 export default function NewProjectModal({ open, onClose, onCreated }: NewProjectModalProps) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<"eda" | "pipeline" | "mixed">("mixed");
@@ -60,6 +62,7 @@ export default function NewProjectModal({ open, onClose, onCreated }: NewProject
       const response = await api.post<Project>("/projects", { name: name.trim(), description, project_type: type });
       toast.success("Project created!");
       onCreated(response.data);
+      router.push(`/projects/${response.data.id}`);
       setName("");
       setDescription("");
       setType("mixed");

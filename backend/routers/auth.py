@@ -17,13 +17,7 @@ from schemas.auth import (
     UserResponse,
     VerifyEmail,
 )
-from services.auth_service import (
-    create_access_token,
-    generate_verification_code,
-    hash_password,
-    send_verification_email,
-    verify_password,
-)
+from services.auth_service import create_access_token, hash_password, verify_password
 from utils.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -32,7 +26,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserRegister, db: Session = Depends(get_db)):
-    """Register a new user account and send an email verification code."""
+    """Register a new user account (email verification disabled)."""
     # Enforce maximum user cap
     if db.query(User).count() >= settings.MAX_USERS:
         raise HTTPException(
@@ -46,21 +40,19 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken.")
 
-    code = generate_verification_code()
     user = User(
         name=payload.name,
         username=payload.username,
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        is_verified=False,
-        verification_code=code,
+        is_verified=True,
+        verification_code=None,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    send_verification_email(payload.email, code)
-    logger.info("New user registered: %s (%s)", user.username, user.email)
+    logger.info("New user registered (auto-verified): %s (%s)", user.username, user.email)
     return user
 
 
@@ -81,36 +73,18 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/verify-email")
-def verify_email(payload: VerifyEmail, db: Session = Depends(get_db)):
-    """Verify a user's email address using the 6-digit code."""
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    if user.is_verified:
-        return {"message": "Email already verified."}
-    if user.verification_code != payload.code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification code.")
-
-    user.is_verified = True
-    user.verification_code = None
-    db.commit()
-    return {"message": "Email verified successfully."}
+def verify_email(_: VerifyEmail, __: Session = Depends(get_db)):
+    """Email verification disabled."""
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail="Email verification is disabled.")
 
 
 @router.post("/resend-verification")
 def resend_verification(email: str, db: Session = Depends(get_db)):
-    """Resend the email verification code."""
+    """Email verification disabled."""
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    if user.is_verified:
-        return {"message": "Email already verified."}
-
-    code = generate_verification_code()
-    user.verification_code = code
-    db.commit()
-    send_verification_email(email, code)
-    return {"message": "Verification code resent."}
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail="Email verification is disabled.")
 
 
 @router.get("/me", response_model=UserResponse)
