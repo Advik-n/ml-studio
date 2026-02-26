@@ -39,42 +39,47 @@ const STEPS = [
 
 // ── Model options per task ────────────────────────────────────────────────────
 const MODELS: Record<TaskType, string[]> = {
-  classification: ["LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier", "SVC", "XGBClassifier"],
-  regression:     ["LinearRegression", "Ridge", "Lasso", "RandomForestRegressor", "GradientBoostingRegressor", "XGBRegressor"],
-  clustering:     ["KMeans", "DBSCAN", "AgglomerativeClustering"],
+  classification: [
+    "LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier",
+    "SVC", "KNeighborsClassifier", "DecisionTreeClassifier", "GaussianNB",
+    "XGBClassifier",
+  ],
+  regression: [
+    "LinearRegression", "Ridge", "Lasso",
+    "RandomForestRegressor", "GradientBoostingRegressor",
+    "SVR", "DecisionTreeRegressor", "XGBRegressor",
+  ],
+  clustering: ["KMeans", "DBSCAN", "AgglomerativeClustering"],
 };
 
 // ── Hyperparameter templates ──────────────────────────────────────────────────
 type HPType = "number" | "select" | "boolean";
 interface HPField { name: string; label: string; type: HPType; default: string | number | boolean; options?: string[] }
 const HP_TEMPLATES: Record<string, HPField[]> = {
-  LogisticRegression:          [{ name: "C", label: "C (Regularization)", type: "number", default: 1.0 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 200 }],
+  LogisticRegression:          [{ name: "C", label: "C (Regularization)", type: "number", default: 1.0 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 1000 }],
   RandomForestClassifier:      [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "max_depth", label: "Max Depth", type: "number", default: 10 }],
   GradientBoostingClassifier:  [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
-  SVC:                         [{ name: "C", label: "C", type: "number", default: 1.0 }, { name: "kernel", label: "Kernel", type: "select", default: "rbf", options: ["linear","rbf","poly"] }],
+  SVC:                         [{ name: "C", label: "C", type: "number", default: 1.0 }, { name: "kernel", label: "Kernel", type: "select", default: "rbf", options: ["linear","rbf","poly","sigmoid"] }],
+  KNeighborsClassifier:        [{ name: "n_neighbors", label: "N Neighbors", type: "number", default: 5 }, { name: "weights", label: "Weights", type: "select", default: "uniform", options: ["uniform","distance"] }],
+  DecisionTreeClassifier:      [{ name: "max_depth", label: "Max Depth", type: "number", default: 10 }, { name: "criterion", label: "Criterion", type: "select", default: "gini", options: ["gini","entropy","log_loss"] }],
+  GaussianNB:                  [],
   XGBClassifier:               [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }, { name: "max_depth", label: "Max Depth", type: "number", default: 6 }],
-  LGBMClassifier:              [],
   LinearRegression:            [],
   Ridge:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
   Lasso:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
   RandomForestRegressor:       [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "max_depth", label: "Max Depth", type: "number", default: 10 }],
   GradientBoostingRegressor:   [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
+  SVR:                         [{ name: "C", label: "C", type: "number", default: 1.0 }, { name: "kernel", label: "Kernel", type: "select", default: "rbf", options: ["linear","rbf","poly","sigmoid"] }],
+  DecisionTreeRegressor:       [{ name: "max_depth", label: "Max Depth", type: "number", default: 10 }, { name: "criterion", label: "Criterion", type: "select", default: "squared_error", options: ["squared_error","friedman_mse","absolute_error","poisson"] }],
   XGBRegressor:                [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
   KMeans:                      [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 300 }],
   DBSCAN:                      [{ name: "eps", label: "Epsilon", type: "number", default: 0.5 }, { name: "min_samples", label: "Min Samples", type: "number", default: 5 }],
   AgglomerativeClustering:     [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "linkage", label: "Linkage", type: "select", default: "ward", options: ["ward","complete","average","single"] }],
-  GaussianMixture:             [],
-  TFIDFLogistic:               [],
-  BertClassifier:              [],
-  NaiveBayesNLP:               [],
-  ResNet50:                    [],
-  EfficientNetB0:              [],
-  MobileNetV2:                 [],
-  VGG16:                       [],
 };
 
 const TRANSFORMERS = [
   "StandardScaler", "MinMaxScaler", "RobustScaler",
+  "MedianImputer", "KNNImputer",
   "PCA", "PolynomialFeatures", "SelectKBest", "VarianceThreshold",
 ];
 

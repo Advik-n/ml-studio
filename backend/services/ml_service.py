@@ -46,12 +46,15 @@ from sklearn.metrics import (
     precision_score,
     r2_score,
     recall_score,
+    roc_auc_score,
     silhouette_score,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
 from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import (
     LabelEncoder,
     MinMaxScaler,
@@ -63,7 +66,7 @@ from sklearn.preprocessing import (
 from sklearn.feature_selection import SelectKBest, VarianceThreshold, f_classif, f_regression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.svm import SVC, SVR
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 
 # Max unique values before switching from OHE to OrdinalEncoder
@@ -77,12 +80,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _CLASSIFIERS: Dict[str, Any] = {
-    "LogisticRegression": LogisticRegression(max_iter=1000),
+    "LogisticRegression": LogisticRegression(max_iter=1000, random_state=42),
     "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
     "GradientBoosting": GradientBoostingClassifier(random_state=42),
     "SVM": SVC(probability=True, random_state=42),
     "KNN": KNeighborsClassifier(),
     "DecisionTree": DecisionTreeClassifier(random_state=42),
+    "NaiveBayes": GaussianNB(),
 }
 
 _REGRESSORS: Dict[str, Any] = {
@@ -92,6 +96,7 @@ _REGRESSORS: Dict[str, Any] = {
     "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
     "GradientBoostingRegressor": GradientBoostingRegressor(random_state=42),
     "SVR": SVR(),
+    "DecisionTreeRegressor": DecisionTreeRegressor(random_state=42),
 }
 
 _CLUSTERERS: Dict[str, Any] = {
@@ -284,6 +289,25 @@ async def build_and_run_pipeline(
                     "precision_weighted": round(float(precision_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
                     "recall_weighted": round(float(recall_score(y_test, y_pred, average="weighted", zero_division=0)), 4),
                 }
+                # ROC-AUC (binary or multiclass OVR)
+                if hasattr(pipeline, "predict_proba"):
+                    try:
+                        proba = pipeline.predict_proba(X_test)
+                        n_classes = proba.shape[1] if proba.ndim > 1 else 2
+                        if n_classes == 2:
+                            auc = roc_auc_score(y_test, proba[:, 1])
+                        else:
+                            auc = roc_auc_score(y_test, proba, multi_class="ovr", average="weighted")
+                        metrics["roc_auc"] = round(float(auc), 4)
+                    except Exception:
+                        metrics["roc_auc"] = None
+                # Confusion matrix as nested list for frontend
+                try:
+                    from sklearn.metrics import confusion_matrix as cm_fn
+                    cm = cm_fn(y_test, y_pred)
+                    metrics["confusion_matrix"] = cm.tolist()
+                except Exception:
+                    pass
         elif model_type == "regression":
             if multi_target and isinstance(y_test, pd.DataFrame):
                 rmses = []
@@ -309,6 +333,7 @@ async def build_and_run_pipeline(
                 metrics = {
                     "r2": round(r2, 4),
                     "rmse": round(rmse, 4),
+                    "mse": round(float(mean_squared_error(y_test, y_pred)), 4),
                     "mae": round(float(mean_absolute_error(y_test, y_pred)), 4),
                 }
 
@@ -469,55 +494,75 @@ def _build_preprocessing_pipeline(
     """
     Construct a ColumnTransformer-based preprocessing step.
 
-    - Numeric columns: StandardScaler (default), MinMaxScaler, or RobustScaler.
-    - Low-cardinality categorical columns: OneHotEncoder.
-    - High-cardinality categorical columns (> threshold): OrdinalEncoder + warning.
-    - Optional post-processing steps: PCA, PolynomialFeatures, SelectKBest,
-      VarianceThreshold (appended after the ColumnTransformer).
+    Pipeline order: Imputation → Encoding/Scaling → Feature Engineering.
     """
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
 
-    # Choose numeric scaler based on user selection
-    if "RobustScaler" in transformer_names:
-        numeric_transformer = RobustScaler()
-    elif "MinMaxScaler" in transformer_names:
-        numeric_transformer = MinMaxScaler()
-    else:
-        numeric_transformer = StandardScaler()
+    # --- Numeric imputer ---
+    if "KNNImputer" in transformer_names:
+        num_imputer = KNNImputer(n_neighbors=5)
+    elif "DropMissing" in transformer_names:
+        num_imputer = SimpleImputer(strategy="median")  # fallback; drop handled at df level
+    elif "MedianImputer" in transformer_names or True:
+        num_imputer = SimpleImputer(strategy="median")
 
-    # Split categorical columns by cardinality
+    # --- Categorical imputer ---
+    cat_imputer = SimpleImputer(strategy="most_frequent")
+
+    # --- Numeric scaler ---
+    if "RobustScaler" in transformer_names:
+        numeric_scaler = RobustScaler()
+    elif "MinMaxScaler" in transformer_names:
+        numeric_scaler = MinMaxScaler()
+    else:
+        numeric_scaler = StandardScaler()
+
+    # --- Numeric sub-pipeline: impute → scale ---
+    from sklearn.pipeline import Pipeline as SkPipeline
+    num_pipeline = SkPipeline([
+        ("imputer", num_imputer),
+        ("scaler", numeric_scaler),
+    ])
+
+    # --- Split categorical columns by cardinality ---
     low_card_cats = [c for c in cat_cols if X[c].nunique() <= _HIGH_CARDINALITY_THRESHOLD]
     high_card_cats = [c for c in cat_cols if X[c].nunique() > _HIGH_CARDINALITY_THRESHOLD]
 
     if high_card_cats:
         logger.warning(
-            "High-cardinality columns (>%d unique) will use OrdinalEncoder instead of "
-            "OneHotEncoder: %s",
-            _HIGH_CARDINALITY_THRESHOLD,
-            high_card_cats,
+            "High-cardinality columns (>%d unique) → OrdinalEncoder: %s",
+            _HIGH_CARDINALITY_THRESHOLD, high_card_cats,
         )
+
+    # --- Categorical sub-pipelines: impute → encode ---
+    low_card_pipeline = SkPipeline([
+        ("imputer", cat_imputer),
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ])
+    high_card_pipeline = SkPipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
+    ])
 
     ct_transformers = []
     if num_cols:
-        ct_transformers.append(("num", numeric_transformer, num_cols))
+        ct_transformers.append(("num", num_pipeline, num_cols))
     if low_card_cats:
-        ct_transformers.append(
-            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), low_card_cats)
-        )
+        ct_transformers.append(("cat", low_card_pipeline, low_card_cats))
     if high_card_cats:
-        ct_transformers.append(
-            ("cat_ord", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), high_card_cats)
-        )
+        ct_transformers.append(("cat_ord", high_card_pipeline, high_card_cats))
 
     if ct_transformers:
         preprocessor = ColumnTransformer(transformers=ct_transformers, remainder="drop")
     else:
-        preprocessor = ColumnTransformer(transformers=[("passthrough", "passthrough", list(X.columns))])
+        preprocessor = ColumnTransformer(
+            transformers=[("passthrough", "passthrough", list(X.columns))]
+        )
 
     steps: List[Tuple[str, Any]] = [("preprocessor", preprocessor)]
 
-    # Optional feature-engineering steps requested by the user
+    # --- Optional feature-engineering steps ---
     if "VarianceThreshold" in transformer_names:
         steps.append(("variance_threshold", VarianceThreshold()))
 
@@ -550,6 +595,9 @@ def _normalize_model_name(name: str, registry: dict) -> str:
         "SVC": "SVM",
         "XGBClassifier": "XGBoost",
         "XGBRegressor": "XGBoostRegressor",
+        "GaussianNB": "NaiveBayes",
+        "KNeighborsClassifier": "KNN",
+        "DecisionTreeClassifier": "DecisionTree",
     }
     aliased = _ALIASES.get(name, name)
     if aliased in registry:
@@ -662,7 +710,8 @@ def _build_pipeline_notebook(
     cells.append(new_code_cell(
         "from sklearn.compose import ColumnTransformer\n"
         "from sklearn.pipeline import Pipeline\n"
-        "from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder\n\n"
+        "from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder\n"
+        "from sklearn.impute import SimpleImputer, KNNImputer\n\n"
         "num_cols = X.select_dtypes(include=np.number).columns.tolist()\n"
         "cat_cols = X.select_dtypes(include=['object','category']).columns.tolist()\n"
         "print('Numeric columns:', num_cols)\n"
@@ -673,13 +722,17 @@ def _build_pipeline_notebook(
         "high_card = [c for c in cat_cols if X[c].nunique() > HIGH_CARD_THRESHOLD]\n"
         "if high_card:\n"
         "    print(f'High-cardinality columns (OrdinalEncoder): {high_card}')\n\n"
+        "# Sub-pipelines: impute → transform\n"
+        "num_pipeline = Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())])\n"
+        "cat_pipeline = Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))])\n"
+        "cat_ord_pipeline = Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('encoder', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))])\n\n"
         "transformers = []\n"
         "if num_cols:\n"
-        "    transformers.append(('num', StandardScaler(), num_cols))\n"
+        "    transformers.append(('num', num_pipeline, num_cols))\n"
         "if low_card:\n"
-        "    transformers.append(('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), low_card))\n"
+        "    transformers.append(('cat', cat_pipeline, low_card))\n"
         "if high_card:\n"
-        "    transformers.append(('cat_ord', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), high_card))\n"
+        "    transformers.append(('cat_ord', cat_ord_pipeline, high_card))\n"
         "preprocessor = ColumnTransformer(transformers=transformers, remainder='drop') if transformers else 'passthrough'\n"
     ))
 
@@ -691,21 +744,27 @@ def _build_pipeline_notebook(
         "SVM": ("svm", "SVC"),
         "KNN": ("neighbors", "KNeighborsClassifier"),
         "DecisionTree": ("tree", "DecisionTreeClassifier"),
+        "NaiveBayes": ("naive_bayes", "GaussianNB"),
         "LinearRegression": ("linear_model", "LinearRegression"),
         "Ridge": ("linear_model", "Ridge"),
         "Lasso": ("linear_model", "Lasso"),
         "RandomForestRegressor": ("ensemble", "RandomForestRegressor"),
         "GradientBoostingRegressor": ("ensemble", "GradientBoostingRegressor"),
         "SVR": ("svm", "SVR"),
+        "DecisionTreeRegressor": ("tree", "DecisionTreeRegressor"),
         "KMeans": ("cluster", "KMeans"),
         "DBSCAN": ("cluster", "DBSCAN"),
         "AgglomerativeClustering": ("cluster", "AgglomerativeClustering"),
+        "XGBoost": ("xgboost", "XGBClassifier"),
+        "XGBoostRegressor": ("xgboost", "XGBRegressor"),
     }
     _mod, _cls = _CLASS_MAP.get(model_name, ("ensemble", model_name))
 
     cells.append(new_markdown_cell("## Model Training"))
+    # Use try/except for optional packages like xgboost
+    import_line = f"from sklearn.{_mod} import {_cls}" if _mod != "xgboost" else f"from xgboost import {_cls}"
     cells.append(new_code_cell(
-        f"from sklearn.{_mod} import {_cls}\n"
+        f"{import_line}\n"
         "# Note: model already trained in background — loading saved artifact\n"
         f"artifact = joblib.load(r'{output_folder}/model.joblib')\n"
         "pipeline = artifact['pipeline']\n"
@@ -818,15 +877,19 @@ def _get_sklearn_module(model_type: str, model_name: str) -> str:
         "SVM": "svm",
         "KNN": "neighbors",
         "DecisionTree": "tree",
+        "NaiveBayes": "naive_bayes",
         "LinearRegression": "linear_model",
         "Ridge": "linear_model",
         "Lasso": "linear_model",
         "RandomForestRegressor": "ensemble",
         "GradientBoostingRegressor": "ensemble",
         "SVR": "svm",
+        "DecisionTreeRegressor": "tree",
         "KMeans": "cluster",
         "DBSCAN": "cluster",
         "AgglomerativeClustering": "cluster",
+        "XGBoost": "xgboost",
+        "XGBoostRegressor": "xgboost",
     }
     return _map.get(model_name, "ensemble")
 

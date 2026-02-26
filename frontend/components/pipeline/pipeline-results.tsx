@@ -22,13 +22,19 @@ interface PipelineResultsProps {
 
 const METRIC_LABELS: Record<string, string> = {
   accuracy: "Accuracy",
-  f1_score: "F1 Score",
-  precision: "Precision",
-  recall: "Recall",
+  f1_weighted: "F1 (Weighted)",
+  precision_weighted: "Precision",
+  recall_weighted: "Recall",
+  roc_auc: "ROC-AUC",
   rmse: "RMSE",
+  mse: "MSE",
   mae: "MAE",
   r2: "R²",
+  silhouette_score: "Silhouette",
 };
+
+// Metrics displayed as raw numbers (not percentages)
+const RAW_METRICS = new Set(["rmse", "mse", "mae"]);
 
 export default function PipelineResults({ job: initialJob, onUpdate }: PipelineResultsProps) {
   const [job, setJob] = useState<PipelineJob>(initialJob);
@@ -71,7 +77,9 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
 
   const parsedMetrics = job.metrics ? JSON.parse(job.metrics) : null;
   const metricsEntries = parsedMetrics
-    ? Object.entries(parsedMetrics).filter(([, v]) => v !== undefined) as [string, number][]
+    ? (Object.entries(parsedMetrics).filter(
+        ([k, v]) => v !== undefined && v !== null && k !== "confusion_matrix"
+      ) as [string, number][])
     : [];
 
   return (
@@ -132,9 +140,11 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
                   className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-center"
                 >
                   <p className="text-2xl font-bold text-[var(--primary)]">
-                    {key === "rmse" || key === "mae"
+                    {RAW_METRICS.has(key)
                       ? value.toFixed(4)
-                      : `${(value * 100).toFixed(1)}%`}
+                      : typeof value === "number"
+                      ? `${(value * 100).toFixed(1)}%`
+                      : String(value)}
                   </p>
                   <p className="text-xs text-[var(--text-muted)] mt-0.5">{METRIC_LABELS[key] || key}</p>
                 </div>

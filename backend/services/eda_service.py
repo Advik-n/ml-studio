@@ -152,8 +152,9 @@ def _analyze_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
         corr_pairs.columns = ["col1", "col2", "corr"]
         corr_pairs = corr_pairs[corr_pairs["col1"] < corr_pairs["col2"]]
         corr_pairs = corr_pairs.sort_values("corr", ascending=False)
+        # Use signed values from original matrix for correct direction
         top_correlations = [
-            (row["col1"], row["col2"], round(row["corr"], 4))
+            (row["col1"], row["col2"], round(float(corr_matrix.loc[row["col1"], row["col2"]]), 4))
             for _, row in corr_pairs.head(5).iterrows()
         ]
 
@@ -268,7 +269,7 @@ def _build_notebook(
         "import os\n\n"
         "sns.set_theme(style='whitegrid')\n"
         "%matplotlib inline\n"
-        "data_file = Path('" + data_file_name + "')\n"
+        "data_file = Path(" + repr(data_file_name) + ")\n"
         "if data_file.suffix.lower() == '.csv':\n"
         "    df = pd.read_csv(data_file)\n"
         "elif data_file.suffix.lower() == '.tsv':\n"
