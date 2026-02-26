@@ -64,7 +64,7 @@ export interface PipelineConfig {
   model_type: string;
   model_name: string;
   transformers: string[];
-  test_size: number;
+  test_size?: number;
   target_column?: string | string[];
   feature_columns?: string[];
   hyperparams?: Record<string, string | number | boolean>;

@@ -32,6 +32,7 @@ from sklearn.ensemble import (
     RandomForestRegressor,
 )
 from sklearn.linear_model import (
+    ElasticNet,
     Lasso,
     LinearRegression,
     LogisticRegression,
@@ -39,7 +40,9 @@ from sklearn.linear_model import (
 )
 from sklearn.metrics import (
     accuracy_score,
+    calinski_harabasz_score,
     classification_report,
+    davies_bouldin_score,
     f1_score,
     mean_absolute_error,
     mean_squared_error,
@@ -68,6 +71,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 
@@ -95,6 +99,7 @@ _REGRESSORS: Dict[str, Any] = {
     "LinearRegression": LinearRegression(),
     "Ridge": Ridge(),
     "Lasso": Lasso(max_iter=1000),
+    "ElasticNet": ElasticNet(max_iter=1000, random_state=42),
     "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
     "GradientBoostingRegressor": GradientBoostingRegressor(random_state=42),
     "SVR": SVR(),
@@ -105,6 +110,7 @@ _CLUSTERERS: Dict[str, Any] = {
     "KMeans": KMeans(n_clusters=3, random_state=42),
     "DBSCAN": DBSCAN(),
     "AgglomerativeClustering": AgglomerativeClustering(n_clusters=3),
+    "GaussianMixture": GaussianMixture(n_components=3, random_state=42),
 }
 
 # NLP models — used with TfidfVectorizer preprocessing
@@ -260,12 +266,25 @@ async def build_and_run_pipeline(
 
     if model_type == "clustering" or y is None:
         X_transformed = pipeline[:-1].fit_transform(X)
-        labels = estimator.fit_predict(X_transformed)
-        if len(set(labels)) > 1:
-            sil = silhouette_score(X_transformed, labels)
-            metrics = {"silhouette_score": round(float(sil), 4)}
+        # GaussianMixture uses predict() not fit_predict()
+        if hasattr(estimator, "fit_predict"):
+            labels = estimator.fit_predict(X_transformed)
         else:
-            metrics = {"silhouette_score": None}
+            estimator.fit(X_transformed)
+            labels = estimator.predict(X_transformed)
+        n_labels = len(set(labels))
+        if n_labels > 1 and n_labels < len(X_transformed):
+            sil = silhouette_score(X_transformed, labels)
+            db_score = davies_bouldin_score(X_transformed, labels)
+            ch_score = calinski_harabasz_score(X_transformed, labels)
+            metrics = {
+                "silhouette_score": round(float(sil), 4),
+                "davies_bouldin": round(float(db_score), 4),
+                "calinski_harabasz": round(float(ch_score), 4),
+                "n_clusters": n_labels,
+            }
+        else:
+            metrics = {"silhouette_score": None, "davies_bouldin": None, "calinski_harabasz": None, "n_clusters": n_labels}
         pipeline.fit(X)
     else:
         # Guard: single-class target → return dummy metrics without fitting
@@ -373,9 +392,13 @@ async def build_and_run_pipeline(
             else:
                 rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
                 r2 = float(r2_score(y_test, y_pred))
+                n = len(y_test)
+                p = X_test.shape[1] if hasattr(X_test, "shape") else 1
+                adj_r2 = 1 - (1 - r2) * (n - 1) / max(n - p - 1, 1)
                 accuracy = round(max(0.0, r2), 4)  # use R² as primary metric
                 metrics = {
                     "r2": round(r2, 4),
+                    "adjusted_r2": round(adj_r2, 4),
                     "rmse": round(rmse, 4),
                     "mse": round(float(mean_squared_error(y_test, y_pred)), 4),
                     "mae": round(float(mean_absolute_error(y_test, y_pred)), 4),
@@ -643,6 +666,8 @@ def _normalize_model_name(name: str, registry: dict) -> str:
         "GaussianNB": "NaiveBayes",
         "KNeighborsClassifier": "KNN",
         "DecisionTreeClassifier": "DecisionTree",
+        "ElasticNet": "ElasticNet",
+        "GaussianMixture": "GaussianMixture",
     }
     aliased = _ALIASES.get(name, name)
     if aliased in registry:
@@ -795,6 +820,7 @@ def _build_pipeline_notebook(
         "LinearRegression": ("linear_model", "LinearRegression"),
         "Ridge": ("linear_model", "Ridge"),
         "Lasso": ("linear_model", "Lasso"),
+        "ElasticNet": ("linear_model", "ElasticNet"),
         "RandomForestRegressor": ("ensemble", "RandomForestRegressor"),
         "GradientBoostingRegressor": ("ensemble", "GradientBoostingRegressor"),
         "SVR": ("svm", "SVR"),
@@ -802,6 +828,7 @@ def _build_pipeline_notebook(
         "KMeans": ("cluster", "KMeans"),
         "DBSCAN": ("cluster", "DBSCAN"),
         "AgglomerativeClustering": ("cluster", "AgglomerativeClustering"),
+        "GaussianMixture": ("mixture", "GaussianMixture"),
         "XGBoost": ("xgboost", "XGBClassifier"),
         "XGBoostRegressor": ("xgboost", "XGBRegressor"),
         "TfidfLogistic": ("linear_model", "LogisticRegression"),
@@ -813,7 +840,12 @@ def _build_pipeline_notebook(
 
     cells.append(new_markdown_cell("## Model Training"))
     # Use try/except for optional packages like xgboost
-    import_line = f"from sklearn.{_mod} import {_cls}" if _mod != "xgboost" else f"from xgboost import {_cls}"
+    if _mod == "xgboost":
+        import_line = f"from xgboost import {_cls}"
+    elif _mod == "mixture":
+        import_line = f"from sklearn.mixture import {_cls}"
+    else:
+        import_line = f"from sklearn.{_mod} import {_cls}"
     cells.append(new_code_cell(
         f"{import_line}\n"
         "# Note: model already trained in background — loading saved artifact\n"

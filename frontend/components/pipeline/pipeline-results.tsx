@@ -30,11 +30,15 @@ const METRIC_LABELS: Record<string, string> = {
   mse: "MSE",
   mae: "MAE",
   r2: "R²",
+  adjusted_r2: "Adjusted R²",
   silhouette_score: "Silhouette",
+  davies_bouldin: "Davies-Bouldin",
+  calinski_harabasz: "Calinski-Harabasz",
+  n_clusters: "N Clusters",
 };
 
 // Metrics displayed as raw numbers (not percentages)
-const RAW_METRICS = new Set(["rmse", "mse", "mae"]);
+const RAW_METRICS = new Set(["rmse", "mse", "mae", "davies_bouldin", "calinski_harabasz", "n_clusters"]);
 
 export default function PipelineResults({ job: initialJob, onUpdate }: PipelineResultsProps) {
   const [job, setJob] = useState<PipelineJob>(initialJob);

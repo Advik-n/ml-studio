@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDropzone } from "react-dropzone";
 import {
@@ -25,31 +25,67 @@ import { toast } from "@/lib/toast";
 import type { PipelineConfig, PipelineJob, TaskType } from "@/lib/types";
 import { formatFileSize } from "@/lib/utils";
 
-// ── Step metadata ─────────────────────────────────────────────────────────────
-const STEPS = [
-  { id: 1, label: "Dataset",           icon: <Database className="h-5 w-5" />,             headerBg: "from-blue-600 to-blue-500",      ring: "ring-blue-500" },
-  { id: 2, label: "Task Type",         icon: <Brain className="h-5 w-5" />,                headerBg: "from-purple-600 to-purple-500",  ring: "ring-purple-500" },
-  { id: 3, label: "Model",             icon: <Brain className="h-5 w-5" />,                headerBg: "from-green-600 to-green-500",    ring: "ring-green-500" },
-  { id: 4, label: "Features Eng.",     icon: <Wrench className="h-5 w-5" />,               headerBg: "from-orange-600 to-orange-500",  ring: "ring-orange-500" },
-  { id: 5, label: "Train/Test Split",  icon: <SplitSquareHorizontal className="h-5 w-5" />, headerBg: "from-teal-600 to-teal-500",     ring: "ring-teal-500" },
-  { id: 6, label: "Features & Target", icon: <Columns className="h-5 w-5" />,              headerBg: "from-pink-600 to-pink-500",      ring: "ring-pink-500" },
-  { id: 7, label: "Hyperparameters",   icon: <Sliders className="h-5 w-5" />,              headerBg: "from-yellow-600 to-yellow-500",  ring: "ring-yellow-500" },
-  { id: 8, label: "Review & Run",      icon: <ClipboardList className="h-5 w-5" />,        headerBg: "from-red-600 to-red-500",        ring: "ring-red-500" },
-];
+// ── Dynamic step system ──────────────────────────────────────────────────────
+type StepId =
+  | "dataset"
+  | "task"
+  | "target"
+  | "features"
+  | "preprocessing"
+  | "split"
+  | "model"
+  | "hyperparams"
+  | "review";
+
+interface StepDef {
+  id: StepId;
+  label: string;
+  icon: React.ReactNode;
+  headerBg: string;
+}
+
+const STEP_DEFS: Record<StepId, StepDef> = {
+  dataset:       { id: "dataset",       label: "Dataset",          icon: <Database className="h-5 w-5" />,              headerBg: "from-blue-600 to-blue-500" },
+  task:          { id: "task",          label: "Task Type",        icon: <Brain className="h-5 w-5" />,                 headerBg: "from-purple-600 to-purple-500" },
+  target:        { id: "target",        label: "Target Column",    icon: <Columns className="h-5 w-5" />,              headerBg: "from-pink-600 to-pink-500" },
+  features:      { id: "features",      label: "Features",         icon: <Columns className="h-5 w-5" />,              headerBg: "from-cyan-600 to-cyan-500" },
+  preprocessing: { id: "preprocessing", label: "Preprocessing",    icon: <Wrench className="h-5 w-5" />,               headerBg: "from-orange-600 to-orange-500" },
+  split:         { id: "split",         label: "Train/Test Split", icon: <SplitSquareHorizontal className="h-5 w-5" />, headerBg: "from-teal-600 to-teal-500" },
+  model:         { id: "model",         label: "Model Selection",  icon: <Brain className="h-5 w-5" />,                headerBg: "from-green-600 to-green-500" },
+  hyperparams:   { id: "hyperparams",   label: "Hyperparameters",  icon: <Sliders className="h-5 w-5" />,              headerBg: "from-yellow-600 to-yellow-500" },
+  review:        { id: "review",        label: "Review & Run",     icon: <ClipboardList className="h-5 w-5" />,        headerBg: "from-red-600 to-red-500" },
+};
+
+/** Returns step sequence specific to each task type per configuration.txt */
+function getStepsForTask(taskType: TaskType): StepDef[] {
+  const s = (id: StepId) => STEP_DEFS[id];
+  switch (taskType) {
+    case "classification":
+    case "regression":
+      return [s("dataset"), s("task"), s("target"), s("features"), s("preprocessing"), s("split"), s("model"), s("hyperparams"), s("review")];
+    case "clustering":
+      // No target column, no train/test split
+      return [s("dataset"), s("task"), s("features"), s("preprocessing"), s("model"), s("hyperparams"), s("review")];
+    case "nlp":
+      // Text + target in one step, no separate features step
+      return [s("dataset"), s("task"), s("target"), s("preprocessing"), s("split"), s("model"), s("hyperparams"), s("review")];
+    default:
+      return [s("dataset"), s("task"), s("target"), s("features"), s("preprocessing"), s("split"), s("model"), s("hyperparams"), s("review")];
+  }
+}
 
 // ── Model options per task ────────────────────────────────────────────────────
 const MODELS: Record<TaskType, string[]> = {
   classification: [
     "LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier",
-    "SVC", "KNeighborsClassifier", "DecisionTreeClassifier", "GaussianNB",
-    "XGBClassifier",
+    "SVC", "KNeighborsClassifier", "DecisionTreeClassifier", "GaussianNB", "XGBClassifier",
   ],
   regression: [
-    "LinearRegression", "Ridge", "Lasso",
+    "LinearRegression", "Ridge", "Lasso", "ElasticNet",
     "RandomForestRegressor", "GradientBoostingRegressor",
     "SVR", "DecisionTreeRegressor", "XGBRegressor",
   ],
-  clustering: ["KMeans", "DBSCAN", "AgglomerativeClustering"],
+  clustering: ["KMeans", "DBSCAN", "AgglomerativeClustering", "GaussianMixture"],
   nlp: ["TfidfLogistic", "TfidfNaiveBayes", "TfidfSVM", "TfidfRandomForest"],
 };
 
@@ -68,21 +104,22 @@ const HP_TEMPLATES: Record<string, HPField[]> = {
   LinearRegression:            [],
   Ridge:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
   Lasso:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
+  ElasticNet:                  [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }, { name: "l1_ratio", label: "L1 Ratio (0=Ridge, 1=Lasso)", type: "number", default: 0.5 }],
   RandomForestRegressor:       [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "max_depth", label: "Max Depth", type: "number", default: 10 }],
   GradientBoostingRegressor:   [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
   SVR:                         [{ name: "C", label: "C", type: "number", default: 1.0 }, { name: "kernel", label: "Kernel", type: "select", default: "rbf", options: ["linear","rbf","poly","sigmoid"] }],
   DecisionTreeRegressor:       [{ name: "max_depth", label: "Max Depth", type: "number", default: 10 }, { name: "criterion", label: "Criterion", type: "select", default: "squared_error", options: ["squared_error","friedman_mse","absolute_error","poisson"] }],
   XGBRegressor:                [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
-  KMeans:                      [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 300 }],
+  KMeans:                      [{ name: "n_clusters", label: "N Clusters", type: "number", default: 3 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 300 }],
   DBSCAN:                      [{ name: "eps", label: "Epsilon", type: "number", default: 0.5 }, { name: "min_samples", label: "Min Samples", type: "number", default: 5 }],
-  AgglomerativeClustering:     [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "linkage", label: "Linkage", type: "select", default: "ward", options: ["ward","complete","average","single"] }],
+  AgglomerativeClustering:     [{ name: "n_clusters", label: "N Clusters", type: "number", default: 3 }, { name: "linkage", label: "Linkage", type: "select", default: "ward", options: ["ward","complete","average","single"] }],
+  GaussianMixture:             [{ name: "n_components", label: "N Components", type: "number", default: 3 }, { name: "covariance_type", label: "Covariance Type", type: "select", default: "full", options: ["full","tied","diag","spherical"] }],
   TfidfLogistic:               [{ name: "C", label: "C (Regularization)", type: "number", default: 1.0 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 1000 }],
   TfidfNaiveBayes:             [{ name: "alpha", label: "Alpha (Smoothing)", type: "number", default: 1.0 }],
   TfidfSVM:                    [{ name: "C", label: "C", type: "number", default: 1.0 }],
   TfidfRandomForest:           [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "max_depth", label: "Max Depth", type: "number", default: 10 }],
 };
 
-// ── NLP model display names ──────────────────────────────────────────────────
 const NLP_MODEL_LABELS: Record<string, string> = {
   TfidfLogistic: "TF-IDF + Logistic Regression",
   TfidfNaiveBayes: "TF-IDF + Naive Bayes",
@@ -90,11 +127,35 @@ const NLP_MODEL_LABELS: Record<string, string> = {
   TfidfRandomForest: "TF-IDF + Random Forest",
 };
 
-const TRANSFORMERS = [
-  "StandardScaler", "MinMaxScaler", "RobustScaler",
-  "MedianImputer", "KNNImputer",
-  "PCA", "PolynomialFeatures", "SelectKBest", "VarianceThreshold",
-];
+// ── Task-specific preprocessing options ──────────────────────────────────────
+interface PreprocessingConfig {
+  scalers: string[];
+  imputers: string[];
+  encoders: string[];
+  featureEng: string[];
+}
+
+const PREPROCESSING: Record<TaskType, PreprocessingConfig> = {
+  classification: {
+    scalers: ["StandardScaler", "RobustScaler"],
+    imputers: ["MedianImputer", "KNNImputer"],
+    encoders: ["OneHotEncoder", "LabelEncoder"],
+    featureEng: ["SelectKBest", "PCA"],
+  },
+  regression: {
+    scalers: ["StandardScaler", "MinMaxScaler", "RobustScaler"],
+    imputers: ["MedianImputer", "KNNImputer"],
+    encoders: ["OneHotEncoder", "LabelEncoder"],
+    featureEng: ["SelectKBest", "PCA", "PolynomialFeatures"],
+  },
+  clustering: {
+    scalers: ["StandardScaler", "MinMaxScaler", "RobustScaler"],
+    imputers: ["MedianImputer", "KNNImputer"],
+    encoders: [],
+    featureEng: ["PCA", "VarianceThreshold"],
+  },
+  nlp: { scalers: [], imputers: [], encoders: [], featureEng: [] },
+};
 
 const TASK_LABELS: Record<TaskType, string> = {
   classification: "Classification",
@@ -103,14 +164,21 @@ const TASK_LABELS: Record<TaskType, string> = {
   nlp: "NLP Text Classification",
 };
 
-// ── Main component ─────────────────────────────────────────────────────────────
+const TASK_DESCRIPTIONS: Record<TaskType, string> = {
+  classification: "Predict discrete labels (Yes/No, categories)",
+  regression: "Predict continuous numeric values",
+  clustering: "Find hidden groups — no target needed",
+  nlp: "Classify text using NLP techniques",
+};
+
+// ── Main component ──────────────────────────────────────────────────────────
 interface PipelineBuilderProps {
   projectId: string;
   onJobCreated: (job: PipelineJob) => void;
 }
 
 export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBuilderProps) {
-  const [currentStep, setCurrentStep] = useState(1);
+  const [stepIndex, setStepIndex] = useState(0);
   const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [running, setRunning] = useState(false);
 
@@ -126,12 +194,17 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
   const [hyperparameters, setHyperparameters] = useState<Record<string, string | number | boolean>>({});
   const [datasetFilename, setDatasetFilename] = useState<string>("");
 
+  // Dynamic steps based on task type
+  const steps = useMemo(() => getStepsForTask(taskType), [taskType]);
+  const currentStep = steps[stepIndex] ?? steps[0];
+  const currentStepId = currentStep.id;
+  const pp = PREPROCESSING[taskType];
+
   // Dataset dropzone
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles[0]) {
       setDatasetFile(acceptedFiles[0]);
       setDatasetFilename(acceptedFiles[0].name);
-      // Parse CSV header
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
@@ -158,40 +231,49 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     maxFiles: 1,
   });
 
-  // Navigation — blocked unless current step is complete
-  const isStepComplete = (step: number): boolean => {
-    switch (step) {
-      case 1: return !!datasetFile;
-      case 2: return !!taskType;
-      case 3: return !!modelName;
-      case 4: return true; // transformers are optional
-      case 5: return testSize > 0 && testSize < 1;
-      case 6:
-        if (taskType === "clustering") return true;
+  // Step completion check
+  const isStepComplete = (sid: StepId): boolean => {
+    switch (sid) {
+      case "dataset": return !!datasetFile;
+      case "task": return !!taskType;
+      case "target":
+        if (taskType === "nlp") return featureColumns.length > 0 && targetColumns.length > 0;
         return targetColumns.length > 0;
-      case 7: return true; // hyperparams are optional
+      case "features": return featureColumns.length > 0;
+      case "preprocessing": return true;
+      case "split": return testSize > 0 && testSize < 1;
+      case "model": return !!modelName;
+      case "hyperparams": return true;
+      case "review": return true;
       default: return true;
     }
   };
 
   const goNext = () => {
-    if (!isStepComplete(currentStep)) return;
+    if (!isStepComplete(currentStepId)) return;
     setDirection("forward");
-    setCurrentStep((s) => Math.min(s + 1, 8));
+    setStepIndex((s) => Math.min(s + 1, steps.length - 1));
   };
   const goBack = () => {
     setDirection("back");
-    setCurrentStep((s) => Math.max(s - 1, 1));
+    setStepIndex((s) => Math.max(s - 1, 0));
   };
 
-  // Toggle transformer
+  // When task type changes, reset dependent state and clamp step index
+  const handleTaskChange = (t: TaskType) => {
+    setTaskType(t);
+    setModelName("");
+    setSelectedTransformers([]);
+    setHyperparameters({});
+    // Stay on task step (always index 1)
+  };
+
   const toggleTransformer = (t: string) => {
     setSelectedTransformers((prev) =>
       prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
     );
   };
 
-  // Toggle feature column
   const toggleFeature = (col: string) => {
     setFeatureColumns((prev) =>
       prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]
@@ -204,7 +286,6 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     );
   };
 
-  // Init HP when model changes
   const handleModelChange = (model: string) => {
     setModelName(model);
     const fields = HP_TEMPLATES[model] || [];
@@ -223,7 +304,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
         model_name: modelName,
         feature_columns: featureColumns,
         target_column: taskType !== "clustering" ? targetColumns : undefined,
-        test_size: testSize,
+        test_size: taskType !== "clustering" ? testSize : undefined,
         transformers: selectedTransformers,
         hyperparams: hyperparameters,
       };
@@ -236,7 +317,6 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
         });
       }
       const jobResponse = await api.post<PipelineJob>(`/pipeline/${projectId}/configure`, config);
-
       toast.success("Pipeline started!");
       onJobCreated(jobResponse.data);
     } catch {
@@ -246,22 +326,452 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     }
   };
 
-  const step = STEPS[currentStep - 1];
   const variants = {
     enter: { x: direction === "forward" ? 40 : -40, opacity: 0 },
     center: { x: 0, opacity: 1 },
     exit: { x: direction === "forward" ? -40 : 40, opacity: 0 },
   };
 
+  // ── Step content renderer ──────────────────────────────────────────────────
+  const renderStepContent = () => {
+    switch (currentStepId) {
+      // ── Dataset ──
+      case "dataset":
+        return (
+          <div className="space-y-4">
+            <div
+              {...getRootProps()}
+              className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
+                isDragActive ? "border-blue-500 bg-blue-500/5" : "border-[var(--border)] hover:border-blue-400"
+              }`}
+            >
+              <input {...getInputProps()} />
+              <Upload className="h-8 w-8 mx-auto mb-2 text-blue-400" />
+              <p className="text-sm font-medium text-[var(--text)]">
+                {isDragActive ? "Drop dataset here" : "Upload your dataset (.csv, .tsv, .xls, .xlsx, .json, .parquet)"}
+              </p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">Drag & drop or click to browse</p>
+            </div>
+            {datasetFile && (
+              <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                <FileText className="h-5 w-5 text-blue-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--text)] truncate">{datasetFile.name}</p>
+                  <p className="text-xs text-[var(--text-muted)]">{formatFileSize(datasetFile.size)} · {columns.length} columns detected</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => { setDatasetFile(null); setDatasetFilename(""); setColumns([]); setFeatureColumns([]); setTargetColumns([]); }}
+                >
+                  <span className="text-sm">✕</span>
+                </Button>
+                <Check className="h-4 w-4 text-emerald-500 shrink-0" />
+              </div>
+            )}
+          </div>
+        );
+
+      // ── Task Type ──
+      case "task":
+        return (
+          <div className="grid grid-cols-2 gap-3">
+            {(Object.keys(TASK_LABELS) as TaskType[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => handleTaskChange(t)}
+                className={`rounded-xl border p-4 text-left transition-all ${
+                  taskType === t
+                    ? "border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/50"
+                    : "border-[var(--border)] hover:border-purple-400 hover:bg-purple-500/5"
+                }`}
+              >
+                <p className="font-semibold text-sm text-[var(--text)]">{TASK_LABELS[t]}</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">{TASK_DESCRIPTIONS[t]}</p>
+              </button>
+            ))}
+          </div>
+        );
+
+      // ── Target Column (+ text column for NLP) ──
+      case "target":
+        if (columns.length === 0) {
+          return <p className="text-sm text-[var(--text-muted)]">No columns detected. Please upload a dataset first.</p>;
+        }
+        if (taskType === "nlp") {
+          return (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Text Column <span className="text-xs text-[var(--text-muted)]">(the column containing text data)</span></p>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {columns.map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => setFeatureColumns([col])}
+                      className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                        featureColumns.includes(col)
+                          ? "border-cyan-500 bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-cyan-400"
+                      }`}
+                    >
+                      {featureColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
+                      {col}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Target Column</p>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {columns.filter((c) => !featureColumns.includes(c)).map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => setTargetColumns([col])}
+                      className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                        targetColumns.includes(col)
+                          ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-400"
+                      }`}
+                    >
+                      {targetColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
+                      {col}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-[var(--text)]">
+              Target Column
+              {taskType === "classification" && <span className="text-xs text-[var(--text-muted)] ml-1">(categorical — auto-detects binary vs multiclass)</span>}
+              {taskType === "regression" && <span className="text-xs text-[var(--text-muted)] ml-1">(must be numeric)</span>}
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+              {columns.map((col) => (
+                <button
+                  key={col}
+                  type="button"
+                  onClick={() => setTargetColumns([col])}
+                  className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                    targetColumns.includes(col)
+                      ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-400"
+                  }`}
+                >
+                  {targetColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
+                  {col}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+
+      // ── Feature Selection ──
+      case "features":
+        if (columns.length === 0) {
+          return <p className="text-sm text-[var(--text-muted)]">No columns detected. Please upload a dataset first.</p>;
+        }
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-[var(--text)]">Select Feature Columns</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setFeatureColumns(columns.filter((c) => !targetColumns.includes(c)))} className="text-xs text-blue-500 hover:text-blue-400">Select All</button>
+                <button type="button" onClick={() => setFeatureColumns([])} className="text-xs text-red-500 hover:text-red-400">Clear</button>
+              </div>
+            </div>
+            {taskType === "clustering" && (
+              <p className="text-xs text-amber-500">⚠ For clustering, non-numeric columns will be auto-encoded. Consider dropping ID/text columns.</p>
+            )}
+            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+              {columns.filter((c) => !targetColumns.includes(c)).map((col) => (
+                <button
+                  key={col}
+                  type="button"
+                  onClick={() => toggleFeature(col)}
+                  className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                    featureColumns.includes(col)
+                      ? "border-cyan-500 bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:border-cyan-400"
+                  }`}
+                >
+                  {featureColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
+                  {col}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">{featureColumns.length} of {columns.length - targetColumns.length} columns selected</p>
+          </div>
+        );
+
+      // ── Preprocessing (task-specific) ──
+      case "preprocessing":
+        if (taskType === "nlp") {
+          return (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
+              <p className="text-sm font-medium text-[var(--text)] mb-2">NLP Text Preprocessing</p>
+              <p className="text-xs text-[var(--text-muted)] mb-3">The following preprocessing is automatically applied:</p>
+              <div className="space-y-2">
+                {["Lowercasing", "English stopword removal", "TF-IDF Vectorization (max_features=5000, ngram_range=(1,2))"].map((item) => (
+                  <div key={item} className="flex items-center gap-2">
+                    <Check className="h-3 w-3 text-emerald-500" />
+                    <span className="text-xs text-[var(--text)]">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="space-y-4">
+            {pp.imputers.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Missing Value Handling</p>
+                <div className="flex flex-wrap gap-2">
+                  {pp.imputers.map((t) => (
+                    <button key={t} type="button" onClick={() => toggleTransformer(t)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                        selectedTransformers.includes(t)
+                          ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-orange-400"
+                      }`}
+                    >
+                      {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pp.encoders.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Encoding</p>
+                <div className="flex flex-wrap gap-2">
+                  {pp.encoders.map((t) => (
+                    <button key={t} type="button" onClick={() => toggleTransformer(t)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                        selectedTransformers.includes(t)
+                          ? "border-violet-500 bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-violet-400"
+                      }`}
+                    >
+                      {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pp.scalers.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">
+                  Scaling
+                  {taskType === "clustering" && <span className="text-xs text-amber-500 ml-1">(Highly recommended for clustering)</span>}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {pp.scalers.map((t) => (
+                    <button key={t} type="button" onClick={() => toggleTransformer(t)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                        selectedTransformers.includes(t)
+                          ? "border-teal-500 bg-teal-500/15 text-teal-600 dark:text-teal-400"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-teal-400"
+                      }`}
+                    >
+                      {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {pp.featureEng.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Feature Engineering</p>
+                <div className="flex flex-wrap gap-2">
+                  {pp.featureEng.map((t) => (
+                    <button key={t} type="button" onClick={() => toggleTransformer(t)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                        selectedTransformers.includes(t)
+                          ? "border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-blue-400"
+                      }`}
+                    >
+                      {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {selectedTransformers.length === 0 && (
+              <p className="text-xs text-[var(--text-muted)]">
+                {taskType === "clustering"
+                  ? "StandardScaler is applied by default if none selected. Scaling is critical for clustering."
+                  : "Default: StandardScaler (numeric) + auto-encoding (categorical). Select to override."}
+              </p>
+            )}
+          </div>
+        );
+
+      // ── Train/Test Split ──
+      case "split":
+        return (
+          <div className="space-y-4">
+            <div className="flex justify-between text-sm text-[var(--text-muted)]">
+              <span>Training: {Math.round((1 - testSize) * 100)}%</span>
+              <span>Testing: {Math.round(testSize * 100)}%</span>
+            </div>
+            <input
+              type="range" min={0.1} max={0.4} step={0.05}
+              value={testSize}
+              onChange={(e) => setTestSize(Number(e.target.value))}
+              className="w-full accent-teal-500"
+            />
+            <div className="flex rounded-xl overflow-hidden h-6">
+              <div
+                className="bg-gradient-to-r from-teal-600 to-teal-400 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-300"
+                style={{ width: `${(1 - testSize) * 100}%` }}
+              >
+                {Math.round((1 - testSize) * 100)}% Train
+              </div>
+              <div
+                className="bg-gradient-to-r from-orange-400 to-orange-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-300"
+                style={{ width: `${testSize * 100}%` }}
+              >
+                {Math.round(testSize * 100)}% Test
+              </div>
+            </div>
+            {taskType === "classification" && (
+              <p className="text-xs text-[var(--text-muted)]">✓ Stratified split is automatically applied for classification tasks.</p>
+            )}
+          </div>
+        );
+
+      // ── Model Selection ──
+      case "model":
+        return (
+          <div className="space-y-2">
+            {MODELS[taskType].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => handleModelChange(m)}
+                className={`w-full rounded-lg border px-4 py-3 text-left text-sm transition-all ${
+                  modelName === m
+                    ? "border-green-500 bg-green-500/10 font-semibold text-[var(--text)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-green-400 hover:bg-green-500/5"
+                }`}
+              >
+                {NLP_MODEL_LABELS[m] || m}
+              </button>
+            ))}
+          </div>
+        );
+
+      // ── Hyperparameters ──
+      case "hyperparams":
+        return (
+          <div className="space-y-4">
+            {!modelName ? (
+              <p className="text-sm text-[var(--text-muted)]">Please select a model first.</p>
+            ) : (HP_TEMPLATES[modelName] || []).length === 0 ? (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center">
+                <p className="text-sm text-[var(--text-muted)]">{NLP_MODEL_LABELS[modelName] || modelName} has no configurable hyperparameters.</p>
+              </div>
+            ) : (
+              (HP_TEMPLATES[modelName] || []).map((field) => (
+                <div key={field.name} className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-[var(--text)]">{field.label}</label>
+                  {field.type === "select" ? (
+                    <select
+                      value={String(hyperparameters[field.name] ?? field.default)}
+                      onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: e.target.value }))}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    >
+                      {field.options!.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : field.type === "boolean" ? (
+                    <input
+                      type="checkbox"
+                      checked={Boolean(hyperparameters[field.name] ?? field.default)}
+                      onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: e.target.checked }))}
+                      className="h-4 w-4 accent-yellow-500"
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      value={Number(hyperparameters[field.name] ?? field.default)}
+                      onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: Number(e.target.value) }))}
+                      step={field.name.includes("rate") || field.name === "C" || field.name === "alpha" || field.name === "eps" || field.name === "l1_ratio" ? 0.01 : 1}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    />
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        );
+
+      // ── Review & Run ──
+      case "review": {
+        const reviewItems = [
+          { label: "Dataset", value: datasetFilename || "Not set" },
+          { label: "Task Type", value: TASK_LABELS[taskType] },
+          ...(taskType !== "clustering"
+            ? [{ label: "Target", value: targetColumns.length > 0 ? targetColumns.join(", ") : "Not set" }]
+            : []),
+          { label: "Features", value: featureColumns.length > 0 ? `${featureColumns.length} selected` : "None" },
+          { label: "Preprocessing", value: selectedTransformers.length > 0 ? selectedTransformers.join(", ") : "Default" },
+          ...(taskType !== "clustering"
+            ? [{ label: "Test Size", value: `${Math.round(testSize * 100)}%` }]
+            : []),
+          { label: "Model", value: NLP_MODEL_LABELS[modelName] || modelName || "Not set" },
+          { label: "Hyperparameters", value: Object.keys(hyperparameters).length > 0 ? `${Object.keys(hyperparameters).length} params` : "Default" },
+        ];
+        const canRun = !!modelName && (taskType === "clustering" || targetColumns.length > 0) && !!datasetFilename;
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              {reviewItems.map((item) => (
+                <div key={item.label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                  <p className="text-xs text-[var(--text-muted)] mb-0.5">{item.label}</p>
+                  <p className="text-sm font-medium text-[var(--text)] truncate">{item.value}</p>
+                </div>
+              ))}
+            </div>
+            <Button
+              className="w-full bg-gradient-to-r from-red-600 to-orange-500 text-white hover:from-red-700 hover:to-orange-600 border-0"
+              size="lg"
+              isLoading={running}
+              onClick={handleRun}
+              disabled={!canRun}
+            >
+              <Play className="h-5 w-5" />
+              Run Pipeline
+            </Button>
+            {!canRun && (
+              <p className="text-xs text-red-500 text-center">Please complete all required steps before running.</p>
+            )}
+          </div>
+        );
+      }
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Top progress */}
+      {/* Top progress bar */}
       <div className="flex gap-1">
-        {STEPS.map((s) => (
+        {steps.map((s, i) => (
           <div
             key={s.id}
-            className={`h-1.5 flex-1 rounded-full transition-all duration-300 bg-gradient-to-r ${
-              s.id <= currentStep ? s.headerBg : "bg-[var(--border)]"
+            className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+              i <= stepIndex ? `bg-gradient-to-r ${s.headerBg}` : "bg-[var(--border)]"
             }`}
           />
         ))}
@@ -269,8 +779,8 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
 
       {/* Step labels */}
       <div className="flex gap-1 text-[10px] text-[var(--text-muted)]">
-        {STEPS.map((s) => (
-          <div key={s.id} className={`flex-1 text-center truncate ${s.id === currentStep ? "font-semibold text-[var(--text)]" : ""}`}>
+        {steps.map((s, i) => (
+          <div key={s.id} className={`flex-1 text-center truncate ${i === stepIndex ? "font-semibold text-[var(--text)]" : ""}`}>
             {s.label}
           </div>
         ))}
@@ -279,7 +789,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
       {/* Step card */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={currentStep}
+          key={currentStepId}
           variants={variants}
           initial="enter"
           animate="center"
@@ -287,321 +797,14 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
           transition={{ duration: 0.25 }}
         >
           <Card className="overflow-hidden">
-            {/* Colored header */}
-            <div className={`bg-gradient-to-r ${step.headerBg} px-5 py-3 flex items-center gap-2`}>
-              <span className="text-white">{step.icon}</span>
+            <div className={`bg-gradient-to-r ${currentStep.headerBg} px-5 py-3 flex items-center gap-2`}>
+              <span className="text-white">{currentStep.icon}</span>
               <span className="text-white font-semibold">
-                Step {step.id}: {step.label}
+                Step {stepIndex + 1}: {currentStep.label}
               </span>
             </div>
-
             <CardContent className="p-5">
-              {/* ── Step 1: Dataset ── */}
-              {currentStep === 1 && (
-                <div className="space-y-4">
-                   <div
-                     {...getRootProps()}
-                     className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
-                       isDragActive ? "border-blue-500 bg-blue-500/5" : "border-[var(--border)] hover:border-blue-400"
-                     }`}
-                   >
-                     <input {...getInputProps()} />
-                     <Upload className="h-8 w-8 mx-auto mb-2 text-blue-400" />
-                     <p className="text-sm font-medium text-[var(--text)]">
-                       {isDragActive ? "Drop dataset here" : "Upload your dataset (.csv, .tsv, .xls, .xlsx, .json, .parquet)"}
-                     </p>
-                     <p className="text-xs text-[var(--text-muted)] mt-1">Drag & drop or click to browse</p>
-                   </div>
-                   {datasetFile && (
-                     <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
-                       <FileText className="h-5 w-5 text-blue-400 shrink-0" />
-                       <div className="min-w-0">
-                         <p className="text-sm font-medium text-[var(--text)] truncate">{datasetFile.name}</p>
-                         <p className="text-xs text-[var(--text-muted)]">{formatFileSize(datasetFile.size)} · {columns.length} columns detected</p>
-                       </div>
-                       <Button
-                         variant="ghost"
-                         size="icon"
-                         onClick={() => {
-                           setDatasetFile(null);
-                           setDatasetFilename("");
-                           setColumns([]);
-                           setFeatureColumns([]);
-                           setTargetColumns([]);
-                         }}
-                       >
-                         <span className="text-sm">✕</span>
-                       </Button>
-                       <Check className="h-4 w-4 text-emerald-500 shrink-0" />
-                     </div>
-                   )}
-                </div>
-              )}
-
-              {/* ── Step 2: Task Type ── */}
-              {currentStep === 2 && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {(Object.keys(TASK_LABELS) as TaskType[]).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => { setTaskType(t); setModelName(""); }}
-                      className={`rounded-xl border p-4 text-left transition-all ${
-                        taskType === t
-                          ? "border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/50"
-                          : "border-[var(--border)] hover:border-purple-400 hover:bg-purple-500/5"
-                      }`}
-                    >
-                      <p className="font-semibold text-sm text-[var(--text)]">{TASK_LABELS[t]}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* ── Step 3: Model ── */}
-              {currentStep === 3 && (
-                <div className="space-y-2">
-                  {MODELS[taskType].map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => handleModelChange(m)}
-                      className={`w-full rounded-lg border px-4 py-3 text-left text-sm transition-all ${
-                        modelName === m
-                          ? "border-green-500 bg-green-500/10 font-semibold text-[var(--text)]"
-                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-green-400 hover:bg-green-500/5"
-                      }`}
-                    >
-                      {NLP_MODEL_LABELS[m] || m}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* ── Step 4: Feature Engineering ── */}
-              {currentStep === 4 && (
-                <div className="space-y-4">
-                  {taskType === "nlp" ? (
-                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center">
-                      <p className="text-sm text-[var(--text-muted)]">NLP pipelines use TF-IDF vectorization automatically. No additional transformers needed.</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text)] mb-2">Scalers & Imputers</p>
-                        <div className="flex flex-wrap gap-2">
-                          {TRANSFORMERS.filter(t => ["StandardScaler","MinMaxScaler","RobustScaler","MedianImputer","KNNImputer"].includes(t)).map((t) => (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => toggleTransformer(t)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                                selectedTransformers.includes(t)
-                                  ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
-                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-orange-400"
-                              }`}
-                            >
-                              {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text)] mb-2">Feature Engineering</p>
-                        <div className="flex flex-wrap gap-2">
-                          {TRANSFORMERS.filter(t => ["PCA","PolynomialFeatures","SelectKBest","VarianceThreshold"].includes(t)).map((t) => (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => toggleTransformer(t)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                                selectedTransformers.includes(t)
-                                  ? "border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-blue-400"
-                              }`}
-                            >
-                              {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  {selectedTransformers.length === 0 && taskType !== "nlp" && (
-                    <p className="text-xs text-[var(--text-muted)]">Default: StandardScaler (numeric) + auto-encoding (categorical). Select transformers to override.</p>
-                  )}
-                </div>
-              )}
-
-              {/* ── Step 5: Train/Test Split ── */}
-              {currentStep === 5 && (
-                <div className="space-y-4">
-                  <div className="flex justify-between text-sm text-[var(--text-muted)]">
-                    <span>Training: {Math.round((1 - testSize) * 100)}%</span>
-                    <span>Testing: {Math.round(testSize * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={0.4}
-                    step={0.05}
-                    value={testSize}
-                    onChange={(e) => setTestSize(Number(e.target.value))}
-                    className="w-full accent-teal-500"
-                  />
-                  <div className="flex rounded-xl overflow-hidden h-6">
-                    <div
-                      className="bg-gradient-to-r from-teal-600 to-teal-400 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-300"
-                      style={{ width: `${(1 - testSize) * 100}%` }}
-                    >
-                      {Math.round((1 - testSize) * 100)}% Train
-                    </div>
-                    <div
-                      className="bg-gradient-to-r from-orange-400 to-orange-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-300"
-                      style={{ width: `${testSize * 100}%` }}
-                    >
-                      {Math.round(testSize * 100)}% Test
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Step 6: Features & Target ── */}
-              {currentStep === 6 && (
-                <div className="space-y-4">
-                   {columns.length === 0 && (
-                     <p className="text-sm text-[var(--text-muted)]">No columns detected. Please upload a dataset in Step 1.</p>
-                   )}
-                  {columns.length > 0 && (
-                    <>
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text)] mb-2">Feature Columns (select multiple)</p>
-                        <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
-                          {columns.map((col) => (
-                            <button
-                              key={col}
-                              type="button"
-                              onClick={() => toggleFeature(col)}
-                              className={`rounded-full border px-3 py-1 text-xs transition-all ${
-                                featureColumns.includes(col)
-                                  ? "border-pink-500 bg-pink-500/15 text-pink-600 dark:text-pink-400"
-                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-pink-400"
-                              }`}
-                            >
-                              {featureColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
-                              {col}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {taskType !== "clustering" && (
-                        <div>
-                          <p className="text-sm font-medium text-[var(--text)] mb-2">Target Columns (select one or more)</p>
-                          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                            {columns.map((col) => (
-                              <button
-                                key={col}
-                                type="button"
-                                onClick={() => toggleTarget(col)}
-                                className={`rounded-full border px-3 py-1 text-xs transition-all ${
-                                  targetColumns.includes(col)
-                                    ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"
-                                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-400"
-                                }`}
-                              >
-                                {targetColumns.includes(col) && <Check className="inline h-3 w-3 mr-1" />}
-                                {col}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* ── Step 7: Hyperparameters ── */}
-              {currentStep === 7 && (
-                <div className="space-y-4">
-                  {!modelName ? (
-                    <p className="text-sm text-[var(--text-muted)]">Please select a model in Step 3 first.</p>
-                  ) : (HP_TEMPLATES[modelName] || []).length === 0 ? (
-                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center">
-                      <p className="text-sm text-[var(--text-muted)]">{modelName} has no configurable hyperparameters.</p>
-                    </div>
-                  ) : (
-                    (HP_TEMPLATES[modelName] || []).map((field) => (
-                      <div key={field.name} className="flex flex-col gap-1.5">
-                        <label className="text-sm font-medium text-[var(--text)]">{field.label}</label>
-                        {field.type === "select" ? (
-                          <select
-                            value={String(hyperparameters[field.name] ?? field.default)}
-                            onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: e.target.value }))}
-                            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                          >
-                            {field.options!.map((o) => <option key={o} value={o}>{o}</option>)}
-                          </select>
-                        ) : field.type === "boolean" ? (
-                          <input
-                            type="checkbox"
-                            checked={Boolean(hyperparameters[field.name] ?? field.default)}
-                            onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: e.target.checked }))}
-                            className="h-4 w-4 accent-yellow-500"
-                          />
-                        ) : (
-                          <input
-                            type="number"
-                            value={Number(hyperparameters[field.name] ?? field.default)}
-                            onChange={(e) => setHyperparameters((p) => ({ ...p, [field.name]: Number(e.target.value) }))}
-                            step={field.name.includes("rate") || field.name === "C" || field.name === "alpha" || field.name === "eps" ? 0.01 : 1}
-                            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                          />
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* ── Step 8: Review & Run ── */}
-              {currentStep === 8 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: "Dataset", value: datasetFilename || "Not set" },
-                      { label: "Task Type", value: TASK_LABELS[taskType] },
-                      { label: "Model", value: modelName || "Not set" },
-                      { label: "Transformers", value: selectedTransformers.length > 0 ? selectedTransformers.join(", ") : "None" },
-                      { label: "Test Size", value: `${Math.round(testSize * 100)}%` },
-                      { label: "Features", value: featureColumns.length > 0 ? `${featureColumns.length} selected` : "None" },
-                      { label: "Target", value: targetColumns.length > 0 ? targetColumns.join(", ") : (taskType === "clustering" ? "N/A" : "Not set") },
-                      { label: "Hyperparameters", value: Object.keys(hyperparameters).length > 0 ? `${Object.keys(hyperparameters).length} params` : "Default" },
-                    ].map((item) => (
-                      <div key={item.label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
-                        <p className="text-xs text-[var(--text-muted)] mb-0.5">{item.label}</p>
-                        <p className="text-sm font-medium text-[var(--text)] truncate">{item.value}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <Button
-                    className="w-full bg-gradient-to-r from-red-600 to-orange-500 text-white hover:from-red-700 hover:to-orange-600 border-0"
-                    size="lg"
-                    isLoading={running}
-                    onClick={handleRun}
-                    disabled={!modelName || (taskType !== "clustering" && targetColumns.length === 0) || !datasetFilename}
-                  >
-                    <Play className="h-5 w-5" />
-                    Run Pipeline
-                  </Button>
-                  {(!modelName || (taskType !== "clustering" && targetColumns.length === 0) || !datasetFilename) && (
-                    <p className="text-xs text-red-500 text-center">Please complete all required steps before running.</p>
-                  )}
-                </div>
-              )}
+              {renderStepContent()}
             </CardContent>
           </Card>
         </motion.div>
@@ -609,20 +812,16 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
 
       {/* Navigation */}
       <div className="flex justify-between items-center">
-        <Button
-          variant="secondary"
-          onClick={goBack}
-          disabled={currentStep === 1}
-        >
+        <Button variant="secondary" onClick={goBack} disabled={stepIndex === 0}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </Button>
-        {currentStep < 8 && (
+        {stepIndex < steps.length - 1 && (
           <div className="flex items-center gap-2">
-            {!isStepComplete(currentStep) && (
+            {!isStepComplete(currentStepId) && (
               <span className="text-xs text-amber-500">Complete this step to continue</span>
             )}
-            <Button onClick={goNext} disabled={!isStepComplete(currentStep)}>
+            <Button onClick={goNext} disabled={!isStepComplete(currentStepId)}>
               Next
               <ChevronRight className="h-4 w-4" />
             </Button>
