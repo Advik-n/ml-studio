@@ -266,6 +266,11 @@ async def build_and_run_pipeline(
 
     if model_type == "clustering" or y is None:
         X_transformed = pipeline[:-1].fit_transform(X)
+        n_features_after = X_transformed.shape[1] if hasattr(X_transformed, 'shape') else 0
+        logger.info(
+            "Clustering: %d input features → %d transformed features",
+            X.shape[1] if hasattr(X, 'shape') else 0, n_features_after,
+        )
         # GaussianMixture uses predict() not fit_predict()
         if hasattr(estimator, "fit_predict"):
             labels = estimator.fit_predict(X_transformed)
@@ -273,18 +278,59 @@ async def build_and_run_pipeline(
             estimator.fit(X_transformed)
             labels = estimator.predict(X_transformed)
         n_labels = len(set(labels))
+
+        # --- Cluster size distribution ---
+        unique_labels, label_counts = np.unique(labels, return_counts=True)
+        cluster_sizes = {int(u): int(c) for u, c in zip(unique_labels, label_counts)}
+        max_pct = float(label_counts.max()) / len(labels) if len(labels) > 0 else 0
+        min_pct = float(label_counts.min()) / len(labels) if len(labels) > 0 else 0
+
         if n_labels > 1 and n_labels < len(X_transformed):
             sil = silhouette_score(X_transformed, labels)
             db_score = davies_bouldin_score(X_transformed, labels)
             ch_score = calinski_harabasz_score(X_transformed, labels)
+
+            # --- Sanity warnings ---
+            _warnings: List[str] = []
+            if sil > 0.95:
+                _warnings.append(
+                    f"Silhouette score {sil:.4f} is suspiciously high (>0.95). "
+                    "This may indicate proxy variables, trivially separable features, "
+                    "or feature-space inflation from encoding."
+                )
+                logger.warning("Clustering: %s", _warnings[-1])
+            if max_pct > 0.9:
+                _warnings.append(
+                    f"Degenerate cluster detected: largest cluster has {max_pct:.0%} of data."
+                )
+                logger.warning("Clustering: %s", _warnings[-1])
+            if min_pct < 0.01 and len(labels) > 100:
+                _warnings.append(
+                    f"Degenerate cluster detected: smallest cluster has < 1% of data."
+                )
+                logger.warning("Clustering: %s", _warnings[-1])
+            if n_features_after > 5 * X.shape[1]:
+                _warnings.append(
+                    f"Feature explosion: {X.shape[1]} input cols expanded to "
+                    f"{n_features_after} features after encoding."
+                )
+                logger.warning("Clustering: %s", _warnings[-1])
+
             metrics = {
                 "silhouette_score": round(float(sil), 4),
                 "davies_bouldin": round(float(db_score), 4),
                 "calinski_harabasz": round(float(ch_score), 4),
                 "n_clusters": n_labels,
+                "cluster_sizes": cluster_sizes,
+                "n_features_after_preprocessing": n_features_after,
             }
+            # Add inertia for KMeans
+            if hasattr(estimator, "inertia_"):
+                metrics["inertia"] = round(float(estimator.inertia_), 4)
+            if _warnings:
+                metrics["warnings"] = _warnings
         else:
-            metrics = {"silhouette_score": None, "davies_bouldin": None, "calinski_harabasz": None, "n_clusters": n_labels}
+            metrics = {"silhouette_score": None, "davies_bouldin": None, "calinski_harabasz": None, "n_clusters": n_labels, "cluster_sizes": cluster_sizes}
         pipeline.fit(X)
     else:
         # Guard: single-class target → return dummy metrics without fitting
@@ -563,9 +609,25 @@ def _build_preprocessing_pipeline(
     Construct a ColumnTransformer-based preprocessing step.
 
     Pipeline order: Imputation → Encoding/Scaling → Feature Engineering.
+
+    For clustering, categorical columns are OrdinalEncoded (not OneHotEncoded)
+    to avoid inflating the feature space with sparse binary dimensions that
+    distort distance-based clustering metrics.  ID-like columns (>90% unique
+    values) are auto-dropped for clustering.
     """
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    # --- For clustering: drop ID-like columns (>= 90% unique values) ---
+    _id_like_dropped: List[str] = []
+    if model_type == "clustering" and cat_cols:
+        _id_like_dropped = [c for c in cat_cols if X[c].nunique() >= 0.9 * len(X)]
+        if _id_like_dropped:
+            logger.warning(
+                "Clustering: dropping ID-like columns (≥90%% unique values): %s",
+                _id_like_dropped,
+            )
+            cat_cols = [c for c in cat_cols if c not in _id_like_dropped]
 
     # --- Numeric imputer ---
     if "KNNImputer" in transformer_names:
@@ -604,22 +666,42 @@ def _build_preprocessing_pipeline(
         )
 
     # --- Categorical sub-pipelines: impute → encode ---
-    low_card_pipeline = SkPipeline([
-        ("imputer", cat_imputer),
-        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-    ])
-    high_card_pipeline = SkPipeline([
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
-    ])
+    # For clustering: use OrdinalEncoder for ALL categoricals to avoid
+    # feature-space inflation from OneHotEncoder.
+    if model_type == "clustering":
+        if low_card_cats:
+            logger.info(
+                "Clustering: using OrdinalEncoder for all categorical columns "
+                "(OneHotEncoder disabled to prevent distance distortion): %s",
+                low_card_cats + high_card_cats,
+            )
+        all_cats = low_card_cats + high_card_cats
+        cat_ordinal_pipeline = SkPipeline([
+            ("imputer", cat_imputer),
+            ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
+        ])
+        ct_transformers = []
+        if num_cols:
+            ct_transformers.append(("num", num_pipeline, num_cols))
+        if all_cats:
+            ct_transformers.append(("cat_ord", cat_ordinal_pipeline, all_cats))
+    else:
+        low_card_pipeline = SkPipeline([
+            ("imputer", cat_imputer),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ])
+        high_card_pipeline = SkPipeline([
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
+        ])
 
-    ct_transformers = []
-    if num_cols:
-        ct_transformers.append(("num", num_pipeline, num_cols))
-    if low_card_cats:
-        ct_transformers.append(("cat", low_card_pipeline, low_card_cats))
-    if high_card_cats:
-        ct_transformers.append(("cat_ord", high_card_pipeline, high_card_cats))
+        ct_transformers = []
+        if num_cols:
+            ct_transformers.append(("num", num_pipeline, num_cols))
+        if low_card_cats:
+            ct_transformers.append(("cat", low_card_pipeline, low_card_cats))
+        if high_card_cats:
+            ct_transformers.append(("cat_ord", high_card_pipeline, high_card_cats))
 
     if ct_transformers:
         preprocessor = ColumnTransformer(transformers=ct_transformers, remainder="drop")
@@ -648,6 +730,19 @@ def _build_preprocessing_pipeline(
         steps.append(("pca", SklearnPCA(n_components=0.95)))
 
     pipeline = Pipeline(steps=steps)
+
+    # Log feature count for debugging
+    n_expected = len(num_cols)
+    if model_type == "clustering":
+        n_expected += len(low_card_cats) + len(high_card_cats)
+    else:
+        n_expected += sum(X[c].nunique() for c in low_card_cats) + len(high_card_cats)
+    logger.info(
+        "Preprocessing pipeline: %d numeric + %d categorical cols → ~%d expected features "
+        "(model_type=%s, dropped_id_like=%s)",
+        len(num_cols), len(cat_cols), n_expected, model_type, _id_like_dropped or "none",
+    )
+
     return pipeline, None
 
 

@@ -35,6 +35,7 @@ class PipelineJobResponse(BaseModel):
     accuracy: Optional[float]
     metrics: Optional[str]
     notebook_path: Optional[str]
+    model_path: Optional[str]
     error_message: Optional[str]
     created_at: datetime
     completed_at: Optional[datetime]

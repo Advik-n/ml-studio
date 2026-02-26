@@ -35,10 +35,14 @@ const METRIC_LABELS: Record<string, string> = {
   davies_bouldin: "Davies-Bouldin",
   calinski_harabasz: "Calinski-Harabasz",
   n_clusters: "N Clusters",
+  cluster_sizes: "Cluster Sizes",
+  inertia: "Inertia",
+  n_features_after_preprocessing: "Features (post-encoding)",
+  warnings: "Warnings",
 };
 
 // Metrics displayed as raw numbers (not percentages)
-const RAW_METRICS = new Set(["rmse", "mse", "mae", "davies_bouldin", "calinski_harabasz", "n_clusters"]);
+const RAW_METRICS = new Set(["rmse", "mse", "mae", "davies_bouldin", "calinski_harabasz", "n_clusters", "inertia", "n_features_after_preprocessing", "cluster_sizes", "warnings"]);
 
 export default function PipelineResults({ job: initialJob, onUpdate }: PipelineResultsProps) {
   const [job, setJob] = useState<PipelineJob>(initialJob);
@@ -80,11 +84,16 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
   };
 
   const parsedMetrics = job.metrics ? JSON.parse(job.metrics) : null;
+
+  // Separate complex metrics from simple numeric ones
+  const complexKeys = new Set(["confusion_matrix", "cluster_sizes", "warnings"]);
   const metricsEntries = parsedMetrics
     ? (Object.entries(parsedMetrics).filter(
-        ([k, v]) => v !== undefined && v !== null && k !== "confusion_matrix"
+        ([k, v]) => v !== undefined && v !== null && !complexKeys.has(k)
       ) as [string, number][])
     : [];
+  const clusterSizes: Record<string, number> | null = parsedMetrics?.cluster_sizes ?? null;
+  const clusterWarnings: string[] = parsedMetrics?.warnings ?? [];
 
   return (
     <div className="space-y-5">
@@ -145,7 +154,7 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
                 >
                   <p className="text-2xl font-bold text-[var(--primary)]">
                     {RAW_METRICS.has(key)
-                      ? value.toFixed(4)
+                      ? typeof value === "number" ? value.toFixed(4) : String(value)
                       : typeof value === "number"
                       ? `${(value * 100).toFixed(1)}%`
                       : String(value)}
@@ -154,6 +163,35 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
                 </div>
               ))}
             </div>
+
+            {/* Cluster size distribution */}
+            {clusterSizes && (
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4">
+                <p className="text-sm font-medium text-[var(--text)] mb-2">Cluster Size Distribution</p>
+                <div className="flex gap-2 flex-wrap">
+                  {Object.entries(clusterSizes).map(([cluster, count]) => {
+                    const total = Object.values(clusterSizes).reduce((a, b) => a + b, 0);
+                    const pct = total > 0 ? ((count / total) * 100).toFixed(1) : "0";
+                    return (
+                      <div key={cluster} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-center">
+                        <p className="text-sm font-bold text-[var(--primary)]">{count}</p>
+                        <p className="text-[10px] text-[var(--text-muted)]">Cluster {cluster} ({pct}%)</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Clustering warnings */}
+            {clusterWarnings.length > 0 && (
+              <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-1">⚠ Quality Warnings</p>
+                {clusterWarnings.map((w, i) => (
+                  <p key={i} className="text-xs text-amber-600 dark:text-amber-400">{w}</p>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
