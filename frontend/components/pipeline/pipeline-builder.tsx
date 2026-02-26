@@ -50,6 +50,7 @@ const MODELS: Record<TaskType, string[]> = {
     "SVR", "DecisionTreeRegressor", "XGBRegressor",
   ],
   clustering: ["KMeans", "DBSCAN", "AgglomerativeClustering"],
+  nlp: ["TfidfLogistic", "TfidfNaiveBayes", "TfidfSVM", "TfidfRandomForest"],
 };
 
 // ── Hyperparameter templates ──────────────────────────────────────────────────
@@ -75,6 +76,18 @@ const HP_TEMPLATES: Record<string, HPField[]> = {
   KMeans:                      [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 300 }],
   DBSCAN:                      [{ name: "eps", label: "Epsilon", type: "number", default: 0.5 }, { name: "min_samples", label: "Min Samples", type: "number", default: 5 }],
   AgglomerativeClustering:     [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "linkage", label: "Linkage", type: "select", default: "ward", options: ["ward","complete","average","single"] }],
+  TfidfLogistic:               [{ name: "C", label: "C (Regularization)", type: "number", default: 1.0 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 1000 }],
+  TfidfNaiveBayes:             [{ name: "alpha", label: "Alpha (Smoothing)", type: "number", default: 1.0 }],
+  TfidfSVM:                    [{ name: "C", label: "C", type: "number", default: 1.0 }],
+  TfidfRandomForest:           [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "max_depth", label: "Max Depth", type: "number", default: 10 }],
+};
+
+// ── NLP model display names ──────────────────────────────────────────────────
+const NLP_MODEL_LABELS: Record<string, string> = {
+  TfidfLogistic: "TF-IDF + Logistic Regression",
+  TfidfNaiveBayes: "TF-IDF + Naive Bayes",
+  TfidfSVM: "TF-IDF + SVM",
+  TfidfRandomForest: "TF-IDF + Random Forest",
 };
 
 const TRANSFORMERS = [
@@ -87,6 +100,7 @@ const TASK_LABELS: Record<TaskType, string> = {
   classification: "Classification",
   regression: "Regression",
   clustering: "Clustering",
+  nlp: "NLP Text Classification",
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -144,8 +158,24 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     maxFiles: 1,
   });
 
-  // Navigation
+  // Navigation — blocked unless current step is complete
+  const isStepComplete = (step: number): boolean => {
+    switch (step) {
+      case 1: return !!datasetFile;
+      case 2: return !!taskType;
+      case 3: return !!modelName;
+      case 4: return true; // transformers are optional
+      case 5: return testSize > 0 && testSize < 1;
+      case 6:
+        if (taskType === "clustering") return true;
+        return targetColumns.length > 0;
+      case 7: return true; // hyperparams are optional
+      default: return true;
+    }
+  };
+
   const goNext = () => {
+    if (!isStepComplete(currentStep)) return;
     setDirection("forward");
     setCurrentStep((s) => Math.min(s + 1, 8));
   };
@@ -342,7 +372,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                           : "border-[var(--border)] text-[var(--text-muted)] hover:border-green-400 hover:bg-green-500/5"
                       }`}
                     >
-                      {m}
+                      {NLP_MODEL_LABELS[m] || m}
                     </button>
                   ))}
                 </div>
@@ -350,27 +380,57 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
 
               {/* ── Step 4: Feature Engineering ── */}
               {currentStep === 4 && (
-                <div className="space-y-3">
-                  <p className="text-sm text-[var(--text-muted)]">Select preprocessing transformers to apply:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {TRANSFORMERS.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => toggleTransformer(t)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                          selectedTransformers.includes(t)
-                            ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
-                            : "border-[var(--border)] text-[var(--text-muted)] hover:border-orange-400"
-                        }`}
-                      >
-                        {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  {selectedTransformers.length === 0 && (
-                    <p className="text-xs text-[var(--text-muted)]">No transformers selected (raw features will be used).</p>
+                <div className="space-y-4">
+                  {taskType === "nlp" ? (
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 text-center">
+                      <p className="text-sm text-[var(--text-muted)]">NLP pipelines use TF-IDF vectorization automatically. No additional transformers needed.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-sm font-medium text-[var(--text)] mb-2">Scalers & Imputers</p>
+                        <div className="flex flex-wrap gap-2">
+                          {TRANSFORMERS.filter(t => ["StandardScaler","MinMaxScaler","RobustScaler","MedianImputer","KNNImputer"].includes(t)).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => toggleTransformer(t)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                                selectedTransformers.includes(t)
+                                  ? "border-orange-500 bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-orange-400"
+                              }`}
+                            >
+                              {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[var(--text)] mb-2">Feature Engineering</p>
+                        <div className="flex flex-wrap gap-2">
+                          {TRANSFORMERS.filter(t => ["PCA","PolynomialFeatures","SelectKBest","VarianceThreshold"].includes(t)).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => toggleTransformer(t)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                                selectedTransformers.includes(t)
+                                  ? "border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-blue-400"
+                              }`}
+                            >
+                              {selectedTransformers.includes(t) && <Check className="inline h-3 w-3 mr-1" />}
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {selectedTransformers.length === 0 && taskType !== "nlp" && (
+                    <p className="text-xs text-[var(--text-muted)]">Default: StandardScaler (numeric) + auto-encoding (categorical). Select transformers to override.</p>
                   )}
                 </div>
               )}
@@ -548,7 +608,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
       </AnimatePresence>
 
       {/* Navigation */}
-      <div className="flex justify-between">
+      <div className="flex justify-between items-center">
         <Button
           variant="secondary"
           onClick={goBack}
@@ -558,10 +618,15 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
           Back
         </Button>
         {currentStep < 8 && (
-          <Button onClick={goNext}>
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {!isStepComplete(currentStep) && (
+              <span className="text-xs text-amber-500">Complete this step to continue</span>
+            )}
+            <Button onClick={goNext} disabled={!isStepComplete(currentStep)}>
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
     </div>

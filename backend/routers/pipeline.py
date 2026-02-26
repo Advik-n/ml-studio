@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline", tags=["Pipeline"])
 
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet"}
-ALLOWED_MODEL_TYPES = {"classification", "regression", "clustering"}
+ALLOWED_MODEL_TYPES = {"classification", "regression", "clustering", "nlp"}
 
 
 async def _run_pipeline_job(
@@ -131,7 +131,7 @@ async def configure_and_run(
     df = _read_dataset(dataset_path)
 
     target_cols = config.target_column if isinstance(config.target_column, list) else ([config.target_column] if config.target_column else [])
-    if config.model_type in {"classification", "regression"} and not target_cols:
+    if config.model_type in {"classification", "regression", "nlp"} and not target_cols:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="target_column is required for supervised model types.",

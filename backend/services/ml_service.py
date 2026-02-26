@@ -68,6 +68,8 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
 
 # Max unique values before switching from OHE to OrdinalEncoder
 _HIGH_CARDINALITY_THRESHOLD = 50
@@ -103,6 +105,14 @@ _CLUSTERERS: Dict[str, Any] = {
     "KMeans": KMeans(n_clusters=3, random_state=42),
     "DBSCAN": DBSCAN(),
     "AgglomerativeClustering": AgglomerativeClustering(n_clusters=3),
+}
+
+# NLP models — used with TfidfVectorizer preprocessing
+_NLP_MODELS: Dict[str, Any] = {
+    "TfidfLogistic": LogisticRegression(max_iter=1000, random_state=42),
+    "TfidfNaiveBayes": MultinomialNB(),
+    "TfidfSVM": SVC(kernel="linear", probability=True, random_state=42),
+    "TfidfRandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
 }
 
 try:
@@ -144,7 +154,7 @@ async def build_and_run_pipeline(
 
     df = _read_dataset(dataset_path)
     model_type: str = config.get("model_type", "classification")
-    allowed_model_types = {"classification", "regression", "clustering"}
+    allowed_model_types = {"classification", "regression", "clustering", "nlp"}
     if model_type not in allowed_model_types:
         raise ValueError(f"Unsupported model_type '{model_type}'. Allowed: {sorted(allowed_model_types)}")
     model_name: str = config.get("model_name", "RandomForest")
@@ -162,7 +172,7 @@ async def build_and_run_pipeline(
     transformer_names: List[str] = config.get("transformers", [])
     hyperparams: Dict[str, Any] = config.get("hyperparams") or {}
 
-    if model_type in {"classification", "regression"} and not target_cols:
+    if model_type in {"classification", "regression", "nlp"} and not target_cols:
         raise ValueError("target_column is required for supervised model types.")
     if target_cols:
         missing_targets = [c for c in target_cols if c not in df.columns]
@@ -198,11 +208,29 @@ async def build_and_run_pipeline(
             model_type = "classification"
 
     # Build preprocessing pipeline
-    pipeline, label_encoder = _build_preprocessing_pipeline(X, transformer_names, model_type)
+    if model_type == "nlp":
+        # NLP pipeline: identify text column(s), use TF-IDF
+        text_col = config.get("text_column")
+        if not text_col:
+            # Auto-detect: pick the first object column with high avg length
+            obj_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+            if obj_cols:
+                avg_lens = {c: X[c].astype(str).str.len().mean() for c in obj_cols}
+                text_col = max(avg_lens, key=avg_lens.get)
+            else:
+                raise ValueError("No text column found for NLP task. Provide a text_column or use object-type features.")
+        text_data = X[text_col].astype(str).fillna("")
+        # Replace X with the text series for TF-IDF pipeline
+        X = text_data
+        pipeline = Pipeline([
+            ("tfidf", TfidfVectorizer(max_features=5000, stop_words="english", ngram_range=(1, 2))),
+        ])
+    else:
+        pipeline, label_encoder = _build_preprocessing_pipeline(X, transformer_names, model_type)
 
-    # Encode target for classification if needed
+    # Encode target for classification / nlp if needed
     le: Any = None
-    if y is not None and model_type == "classification":
+    if y is not None and model_type in ("classification", "nlp"):
         if multi_target and isinstance(y, pd.DataFrame):
             encoders: Dict[str, LabelEncoder] = {}
             for col in target_cols:
@@ -240,9 +268,25 @@ async def build_and_run_pipeline(
             metrics = {"silhouette_score": None}
         pipeline.fit(X)
     else:
-        # Stratified split for classification to preserve class distribution
+        # Guard: single-class target → return dummy metrics without fitting
+        if model_type in ("classification", "nlp") and not multi_target:
+            n_classes = pd.Series(y).nunique()
+            if n_classes < 2:
+                logger.warning("Only %d class found in target — returning constant prediction.", n_classes)
+                constant_val = pd.Series(y).iloc[0]
+                metrics = {"accuracy": 1.0, "f1_weighted": 1.0, "precision_weighted": 1.0, "recall_weighted": 1.0, "warning": "single_class_target"}
+                accuracy = 1.0
+                # Still save an unfitted pipeline so artifact exists
+                model_path = os.path.join(output_folder, "model.joblib")
+                _saved_feature_cols = list(X.columns) if hasattr(X, "columns") else ([X.name] if hasattr(X, "name") else [])
+                joblib.dump({"pipeline": pipeline, "label_encoder": le, "target_columns": target_cols, "feature_columns": _saved_feature_cols}, model_path)
+                notebook_path = os.path.join(output_folder, "pipeline_report.ipynb")
+                _build_pipeline_notebook(dataset_path=dataset_path, output_folder=output_folder, notebook_path=notebook_path, config=config, metrics=metrics, feature_cols=_saved_feature_cols, target_cols=target_cols)
+                return {"model_path": model_path, "notebook_path": notebook_path, "accuracy": accuracy, "metrics": json.dumps(metrics), "status": "completed", "model_type": model_type}
+
+        # Stratified split for classification/nlp to preserve class distribution
         stratify_target = None
-        if model_type == "classification" and not multi_target:
+        if model_type in ("classification", "nlp") and not multi_target:
             # Only stratify if every class has >= 2 samples
             vc = pd.Series(y).value_counts()
             if vc.min() >= 2:
@@ -252,8 +296,8 @@ async def build_and_run_pipeline(
             X, y, test_size=test_size, random_state=42, stratify=stratify_target
         )
 
-        # Class imbalance detection and auto-balancing for classification
-        if model_type == "classification" and not multi_target:
+        # Class imbalance detection and auto-balancing for classification/nlp
+        if model_type in ("classification", "nlp") and not multi_target:
             class_counts = pd.Series(y_train).value_counts()
             imbalance_ratio = class_counts.max() / max(class_counts.min(), 1)
             if imbalance_ratio > 3:
@@ -271,7 +315,7 @@ async def build_and_run_pipeline(
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
 
-        if model_type == "classification":
+        if model_type in ("classification", "nlp"):
             if multi_target and isinstance(y_test, pd.DataFrame):
                 accs = []
                 per_target = {}
@@ -346,12 +390,13 @@ async def build_and_run_pipeline(
         )
         shutil.copy2(model_path, backup_path)
         logger.info("Existing model backed up to %s", backup_path)
+    _saved_feature_cols = list(X.columns) if hasattr(X, "columns") else ([X.name] if hasattr(X, "name") else [])
     joblib.dump(
         {
             "pipeline": pipeline,
             "label_encoder": le,
             "target_columns": target_cols,
-            "feature_columns": list(X.columns),
+            "feature_columns": _saved_feature_cols,
         },
         model_path,
     )
@@ -365,7 +410,7 @@ async def build_and_run_pipeline(
         notebook_path=notebook_path,
         config=config,
         metrics=metrics,
-        feature_cols=list(X.columns),
+        feature_cols=_saved_feature_cols,
         target_cols=target_cols,
     )
     _execute_notebook(notebook_path)
@@ -569,15 +614,15 @@ def _build_preprocessing_pipeline(
     if "PolynomialFeatures" in transformer_names:
         steps.append(("poly", PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)))
 
-    if "SelectKBest" in transformer_names:
+    if "SelectKBest" in transformer_names and model_type != "clustering":
         score_fn = f_regression if model_type == "regression" else f_classif
         n_est = max(1, len(num_cols) + len(low_card_cats) * 5 + len(high_card_cats))
         steps.append(("select_k_best", SelectKBest(score_func=score_fn, k=min(10, n_est))))
 
     if "PCA" in transformer_names:
         from sklearn.decomposition import PCA as SklearnPCA
-        n_features_est = max(1, len(num_cols) + len(low_card_cats) * 5 + len(high_card_cats))
-        steps.append(("pca", SklearnPCA(n_components=min(50, n_features_est))))
+        # Use variance ratio to auto-select components — safe regardless of feature count
+        steps.append(("pca", SklearnPCA(n_components=0.95)))
 
     pipeline = Pipeline(steps=steps)
     return pipeline, None
@@ -622,6 +667,8 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
         registry = _REGRESSORS
     elif model_type == "clustering":
         registry = _CLUSTERERS
+    elif model_type == "nlp":
+        registry = _NLP_MODELS
 
     model_name = _normalize_model_name(model_name, registry)
 
@@ -757,6 +804,10 @@ def _build_pipeline_notebook(
         "AgglomerativeClustering": ("cluster", "AgglomerativeClustering"),
         "XGBoost": ("xgboost", "XGBClassifier"),
         "XGBoostRegressor": ("xgboost", "XGBRegressor"),
+        "TfidfLogistic": ("linear_model", "LogisticRegression"),
+        "TfidfNaiveBayes": ("naive_bayes", "MultinomialNB"),
+        "TfidfSVM": ("svm", "SVC"),
+        "TfidfRandomForest": ("ensemble", "RandomForestClassifier"),
     }
     _mod, _cls = _CLASS_MAP.get(model_name, ("ensemble", model_name))
 
@@ -781,7 +832,7 @@ def _build_pipeline_notebook(
         "    print(f'  {k}: {v}')"
     ))
 
-    if model_type == "classification" and target_cols:
+    if model_type in ("classification", "nlp") and target_cols:
         cells.append(new_markdown_cell("## Confusion Matrix"))
         cells.append(new_code_cell(
             "if y is not None:\n"
@@ -890,6 +941,10 @@ def _get_sklearn_module(model_type: str, model_name: str) -> str:
         "AgglomerativeClustering": "cluster",
         "XGBoost": "xgboost",
         "XGBoostRegressor": "xgboost",
+        "TfidfLogistic": "linear_model",
+        "TfidfNaiveBayes": "naive_bayes",
+        "TfidfSVM": "svm",
+        "TfidfRandomForest": "ensemble",
     }
     return _map.get(model_name, "ensemble")
 
