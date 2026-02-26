@@ -70,7 +70,7 @@ export interface PipelineConfig {
   hyperparams?: Record<string, string | number | boolean>;
 }
 
-export type TaskType = "classification" | "regression" | "clustering" | "nlp" | "image_recognition";
+export type TaskType = "classification" | "regression" | "clustering";
 
 export interface RegisterRequest {
   name: string;

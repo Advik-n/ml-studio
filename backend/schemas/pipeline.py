@@ -9,7 +9,7 @@ class PipelineConfig(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     dataset_filename: str
-    model_type: str          # classification / regression / clustering / nlp / image
+    model_type: str          # classification / regression / clustering
     model_name: str
     transformers: List[str] = []
     test_size: float = 0.2

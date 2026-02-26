@@ -39,11 +39,9 @@ const STEPS = [
 
 // ── Model options per task ────────────────────────────────────────────────────
 const MODELS: Record<TaskType, string[]> = {
-  classification: ["LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier", "SVC", "XGBClassifier", "LGBMClassifier"],
+  classification: ["LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier", "SVC", "XGBClassifier"],
   regression:     ["LinearRegression", "Ridge", "Lasso", "RandomForestRegressor", "GradientBoostingRegressor", "XGBRegressor"],
-  clustering:     ["KMeans", "DBSCAN", "AgglomerativeClustering", "GaussianMixture"],
-  nlp:            ["TFIDFLogistic", "BertClassifier", "NaiveBayesNLP"],
-  image_recognition: ["ResNet50", "EfficientNetB0", "MobileNetV2", "VGG16"],
+  clustering:     ["KMeans", "DBSCAN", "AgglomerativeClustering"],
 };
 
 // ── Hyperparameter templates ──────────────────────────────────────────────────
@@ -55,7 +53,7 @@ const HP_TEMPLATES: Record<string, HPField[]> = {
   GradientBoostingClassifier:  [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
   SVC:                         [{ name: "C", label: "C", type: "number", default: 1.0 }, { name: "kernel", label: "Kernel", type: "select", default: "rbf", options: ["linear","rbf","poly"] }],
   XGBClassifier:               [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }, { name: "max_depth", label: "Max Depth", type: "number", default: 6 }],
-  LGBMClassifier:              [{ name: "n_estimators", label: "N Estimators", type: "number", default: 100 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.1 }],
+  LGBMClassifier:              [],
   LinearRegression:            [],
   Ridge:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
   Lasso:                       [{ name: "alpha", label: "Alpha", type: "number", default: 1.0 }],
@@ -65,28 +63,25 @@ const HP_TEMPLATES: Record<string, HPField[]> = {
   KMeans:                      [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "max_iter", label: "Max Iterations", type: "number", default: 300 }],
   DBSCAN:                      [{ name: "eps", label: "Epsilon", type: "number", default: 0.5 }, { name: "min_samples", label: "Min Samples", type: "number", default: 5 }],
   AgglomerativeClustering:     [{ name: "n_clusters", label: "N Clusters", type: "number", default: 8 }, { name: "linkage", label: "Linkage", type: "select", default: "ward", options: ["ward","complete","average","single"] }],
-  GaussianMixture:             [{ name: "n_components", label: "N Components", type: "number", default: 3 }],
-  TFIDFLogistic:               [{ name: "max_features", label: "Max Features", type: "number", default: 10000 }],
-  BertClassifier:              [{ name: "epochs", label: "Epochs", type: "number", default: 3 }],
+  GaussianMixture:             [],
+  TFIDFLogistic:               [],
+  BertClassifier:              [],
   NaiveBayesNLP:               [],
-  ResNet50:                    [{ name: "epochs", label: "Epochs", type: "number", default: 10 }, { name: "learning_rate", label: "Learning Rate", type: "number", default: 0.001 }],
-  EfficientNetB0:              [{ name: "epochs", label: "Epochs", type: "number", default: 10 }],
-  MobileNetV2:                 [{ name: "epochs", label: "Epochs", type: "number", default: 10 }],
-  VGG16:                       [{ name: "epochs", label: "Epochs", type: "number", default: 10 }],
+  ResNet50:                    [],
+  EfficientNetB0:              [],
+  MobileNetV2:                 [],
+  VGG16:                       [],
 };
 
 const TRANSFORMERS = [
   "StandardScaler", "MinMaxScaler", "RobustScaler",
-  "PCA", "LabelEncoder", "OneHotEncoder",
-  "PolynomialFeatures", "SelectKBest", "VarianceThreshold",
+  "PCA", "PolynomialFeatures", "SelectKBest", "VarianceThreshold",
 ];
 
 const TASK_LABELS: Record<TaskType, string> = {
   classification: "Classification",
   regression: "Regression",
   clustering: "Clustering",
-  nlp: "NLP",
-  image_recognition: "Image Recognition",
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────

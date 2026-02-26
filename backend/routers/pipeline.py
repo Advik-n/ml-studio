@@ -16,13 +16,14 @@ from models.pipeline_job import PipelineJob
 from models.project import Project
 from models.user import User
 from schemas.pipeline import PipelineConfig, PipelineJobResponse, PredictRequest, PredictResponse
-from services.ml_service import build_and_run_pipeline, predict
+from services.ml_service import build_and_run_pipeline, predict, _read_dataset
 from utils.dependencies import require_verified_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline", tags=["Pipeline"])
 
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet"}
+ALLOWED_MODEL_TYPES = {"classification", "regression", "clustering"}
 
 
 async def _run_pipeline_job(
@@ -114,12 +115,41 @@ async def configure_and_run(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
+    if config.model_type not in ALLOWED_MODEL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported model_type '{config.model_type}'. Allowed: {sorted(ALLOWED_MODEL_TYPES)}",
+        )
+
     dataset_path = os.path.join(project.folder_path, "datasets", config.dataset_filename)
     if not os.path.exists(dataset_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Dataset '{config.dataset_filename}' not found. Upload it first.",
         )
+
+    df = _read_dataset(dataset_path)
+
+    target_cols = config.target_column if isinstance(config.target_column, list) else ([config.target_column] if config.target_column else [])
+    if config.model_type in {"classification", "regression"} and not target_cols:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target_column is required for supervised model types.",
+        )
+    if target_cols:
+        missing = [c for c in target_cols if c not in df.columns]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Target column(s) not found in dataset: {missing}",
+            )
+    if config.feature_columns:
+        overlap = set(config.feature_columns) & set(target_cols)
+        if overlap:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Target columns cannot be used as features: {sorted(overlap)}",
+            )
 
     target_value = (
         json.dumps(config.target_column)

@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,7 +25,6 @@ import numpy as np
 import pandas as pd
 from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook
 from sklearn.compose import ColumnTransformer
-from sklearn.decomposition import TruncatedSVD
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
@@ -55,11 +56,18 @@ from sklearn.preprocessing import (
     LabelEncoder,
     MinMaxScaler,
     OneHotEncoder,
+    OrdinalEncoder,
+    RobustScaler,
     StandardScaler,
 )
+from sklearn.feature_selection import SelectKBest, VarianceThreshold, f_classif, f_regression
+from sklearn.preprocessing import PolynomialFeatures
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+
+# Max unique values before switching from OHE to OrdinalEncoder
+_HIGH_CARDINALITY_THRESHOLD = 50
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +139,9 @@ async def build_and_run_pipeline(
 
     df = _read_dataset(dataset_path)
     model_type: str = config.get("model_type", "classification")
+    allowed_model_types = {"classification", "regression", "clustering"}
+    if model_type not in allowed_model_types:
+        raise ValueError(f"Unsupported model_type '{model_type}'. Allowed: {sorted(allowed_model_types)}")
     model_name: str = config.get("model_name", "RandomForest")
     target_raw = config.get("target_column")
     target_cols: List[str] = []
@@ -146,8 +157,18 @@ async def build_and_run_pipeline(
     transformer_names: List[str] = config.get("transformers", [])
     hyperparams: Dict[str, Any] = config.get("hyperparams") or {}
 
+    if model_type in {"classification", "regression"} and not target_cols:
+        raise ValueError("target_column is required for supervised model types.")
+    if target_cols:
+        missing_targets = [c for c in target_cols if c not in df.columns]
+        if missing_targets:
+            raise ValueError(f"Target column(s) not found in dataset: {missing_targets}")
+
     # Resolve feature and target columns
     if feature_cols:
+        overlap = set(feature_cols) & set(target_cols)
+        if overlap:
+            raise ValueError(f"Target columns cannot be used as features: {sorted(overlap)}")
         X = df[feature_cols]
     elif target_cols:
         X = df.drop(columns=target_cols)
@@ -156,7 +177,7 @@ async def build_and_run_pipeline(
         target_cols = [df.columns[-1]]
         target_col = target_cols[0]
 
-    if target_cols and all(col in df.columns for col in target_cols):
+    if target_cols:
         y = df[target_cols] if multi_target else df[target_col]
     else:
         y = None
@@ -214,9 +235,34 @@ async def build_and_run_pipeline(
             metrics = {"silhouette_score": None}
         pipeline.fit(X)
     else:
+        # Stratified split for classification to preserve class distribution
+        stratify_target = None
+        if model_type == "classification" and not multi_target:
+            # Only stratify if every class has >= 2 samples
+            vc = pd.Series(y).value_counts()
+            if vc.min() >= 2:
+                stratify_target = y
+
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42
+            X, y, test_size=test_size, random_state=42, stratify=stratify_target
         )
+
+        # Class imbalance detection and auto-balancing for classification
+        if model_type == "classification" and not multi_target:
+            class_counts = pd.Series(y_train).value_counts()
+            imbalance_ratio = class_counts.max() / max(class_counts.min(), 1)
+            if imbalance_ratio > 3:
+                logger.warning(
+                    "Class imbalance detected (ratio %.1f:1). Applying class_weight='balanced' if supported.",
+                    imbalance_ratio,
+                )
+                inner_estimator = estimator.estimators_[0] if hasattr(estimator, 'estimators_') else estimator
+                if hasattr(inner_estimator, "class_weight"):
+                    try:
+                        inner_estimator.set_params(class_weight="balanced")
+                    except Exception:
+                        pass
+
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
 
@@ -268,6 +314,13 @@ async def build_and_run_pipeline(
 
     # Save model + label encoder
     model_path = os.path.join(output_folder, "model.joblib")
+    if os.path.exists(model_path):
+        backup_path = os.path.join(
+            output_folder,
+            f"model.joblib.bak_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        )
+        shutil.copy2(model_path, backup_path)
+        logger.info("Existing model backed up to %s", backup_path)
     joblib.dump(
         {
             "pipeline": pipeline,
@@ -334,9 +387,9 @@ def predict(
             cols_list = list(cols) if isinstance(cols, (list, tuple, np.ndarray)) else list(cols) if cols else []
             if transformer is None:
                 continue
-            if name == "num" or isinstance(transformer, (StandardScaler, MinMaxScaler)):
+            if name == "num" or isinstance(transformer, (StandardScaler, MinMaxScaler, RobustScaler)):
                 num_cols.update(cols_list)
-            elif name == "cat" or isinstance(transformer, OneHotEncoder):
+            elif name in ("cat", "cat_ord") or isinstance(transformer, (OneHotEncoder, OrdinalEncoder)):
                 cat_cols.update(cols_list)
 
     if feature_columns:
@@ -416,45 +469,100 @@ def _build_preprocessing_pipeline(
     """
     Construct a ColumnTransformer-based preprocessing step.
 
-    Numeric columns receive StandardScaler (or MinMaxScaler if requested).
-    Categorical columns receive OneHotEncoder.
+    - Numeric columns: StandardScaler (default), MinMaxScaler, or RobustScaler.
+    - Low-cardinality categorical columns: OneHotEncoder.
+    - High-cardinality categorical columns (> threshold): OrdinalEncoder + warning.
+    - Optional post-processing steps: PCA, PolynomialFeatures, SelectKBest,
+      VarianceThreshold (appended after the ColumnTransformer).
     """
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
 
-    use_minmax = "MinMaxScaler" in transformer_names
-    numeric_transformer = MinMaxScaler() if use_minmax else StandardScaler()
+    # Choose numeric scaler based on user selection
+    if "RobustScaler" in transformer_names:
+        numeric_transformer = RobustScaler()
+    elif "MinMaxScaler" in transformer_names:
+        numeric_transformer = MinMaxScaler()
+    else:
+        numeric_transformer = StandardScaler()
 
-    transformers = []
-    if num_cols:
-        transformers.append(("num", numeric_transformer, num_cols))
-    if cat_cols:
-        transformers.append(
-            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols)
+    # Split categorical columns by cardinality
+    low_card_cats = [c for c in cat_cols if X[c].nunique() <= _HIGH_CARDINALITY_THRESHOLD]
+    high_card_cats = [c for c in cat_cols if X[c].nunique() > _HIGH_CARDINALITY_THRESHOLD]
+
+    if high_card_cats:
+        logger.warning(
+            "High-cardinality columns (>%d unique) will use OrdinalEncoder instead of "
+            "OneHotEncoder: %s",
+            _HIGH_CARDINALITY_THRESHOLD,
+            high_card_cats,
         )
 
-    if transformers:
-        preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
+    ct_transformers = []
+    if num_cols:
+        ct_transformers.append(("num", numeric_transformer, num_cols))
+    if low_card_cats:
+        ct_transformers.append(
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), low_card_cats)
+        )
+    if high_card_cats:
+        ct_transformers.append(
+            ("cat_ord", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), high_card_cats)
+        )
+
+    if ct_transformers:
+        preprocessor = ColumnTransformer(transformers=ct_transformers, remainder="drop")
     else:
         preprocessor = ColumnTransformer(transformers=[("passthrough", "passthrough", list(X.columns))])
 
-    pipeline = Pipeline(steps=[("preprocessor", preprocessor)])
+    steps: List[Tuple[str, Any]] = [("preprocessor", preprocessor)]
+
+    # Optional feature-engineering steps requested by the user
+    if "VarianceThreshold" in transformer_names:
+        steps.append(("variance_threshold", VarianceThreshold()))
+
+    if "PolynomialFeatures" in transformer_names:
+        steps.append(("poly", PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)))
+
+    if "SelectKBest" in transformer_names:
+        score_fn = f_regression if model_type == "regression" else f_classif
+        n_est = max(1, len(num_cols) + len(low_card_cats) * 5 + len(high_card_cats))
+        steps.append(("select_k_best", SelectKBest(score_func=score_fn, k=min(10, n_est))))
+
+    if "PCA" in transformer_names:
+        from sklearn.decomposition import PCA as SklearnPCA
+        n_features_est = max(1, len(num_cols) + len(low_card_cats) * 5 + len(high_card_cats))
+        steps.append(("pca", SklearnPCA(n_components=min(50, n_features_est))))
+
+    pipeline = Pipeline(steps=steps)
     return pipeline, None
 
 
 def _normalize_model_name(name: str, registry: dict) -> str:
-    """Case-insensitive / underscore-insensitive model name lookup."""
-    # Direct match
+    """Case-insensitive / underscore-insensitive model name lookup with alias support."""
     if name in registry:
         return name
-    # Normalize: lowercase, remove underscores/spaces for comparison
+
+    # Common frontend → backend aliases
+    _ALIASES = {
+        "RandomForestClassifier": "RandomForest",
+        "GradientBoostingClassifier": "GradientBoosting",
+        "SVC": "SVM",
+        "XGBClassifier": "XGBoost",
+        "XGBRegressor": "XGBoostRegressor",
+    }
+    aliased = _ALIASES.get(name, name)
+    if aliased in registry:
+        return aliased
+
+    # Normalize: lowercase, remove underscores/spaces/suffixes
     def _norm(s: str) -> str:
         return s.lower().replace("_", "").replace(" ", "")
     normalized = _norm(name)
     for key in registry:
         if _norm(key) == normalized:
             return key
-    return name  # unchanged (will fall back to first)
+    return name
 
 
 def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]) -> Any:
@@ -469,11 +577,11 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
 
     model_name = _normalize_model_name(model_name, registry)
 
+    if not registry:
+        raise ValueError(f"No models registered for model_type '{model_type}'.")
+
     if model_name not in registry:
-        # Fallback to the first available model of the requested type
-        fallback = next(iter(registry))
-        logger.warning("Unknown model '%s', falling back to '%s'", model_name, fallback)
-        model_name = fallback
+        raise ValueError(f"Unknown model '{model_name}' for model_type '{model_type}'. Allowed: {list(registry.keys())}")
 
     # Clone to avoid mutating the shared global registry instance
     estimator = clone(registry[model_name])
@@ -554,16 +662,24 @@ def _build_pipeline_notebook(
     cells.append(new_code_cell(
         "from sklearn.compose import ColumnTransformer\n"
         "from sklearn.pipeline import Pipeline\n"
-        "from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder\n\n"
+        "from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder\n\n"
         "num_cols = X.select_dtypes(include=np.number).columns.tolist()\n"
         "cat_cols = X.select_dtypes(include=['object','category']).columns.tolist()\n"
         "print('Numeric columns:', num_cols)\n"
         "print('Categorical columns:', cat_cols)\n\n"
+        "# Split cat cols by cardinality — OHE for low, Ordinal for high\n"
+        "HIGH_CARD_THRESHOLD = 50\n"
+        "low_card = [c for c in cat_cols if X[c].nunique() <= HIGH_CARD_THRESHOLD]\n"
+        "high_card = [c for c in cat_cols if X[c].nunique() > HIGH_CARD_THRESHOLD]\n"
+        "if high_card:\n"
+        "    print(f'High-cardinality columns (OrdinalEncoder): {high_card}')\n\n"
         "transformers = []\n"
         "if num_cols:\n"
         "    transformers.append(('num', StandardScaler(), num_cols))\n"
-        "if cat_cols:\n"
-        "    transformers.append(('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_cols))\n"
+        "if low_card:\n"
+        "    transformers.append(('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), low_card))\n"
+        "if high_card:\n"
+        "    transformers.append(('cat_ord', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), high_card))\n"
         "preprocessor = ColumnTransformer(transformers=transformers, remainder='drop') if transformers else 'passthrough'\n"
     ))
 
@@ -610,7 +726,12 @@ def _build_pipeline_notebook(
         cells.append(new_markdown_cell("## Confusion Matrix"))
         cells.append(new_code_cell(
             "if y is not None:\n"
-            f"    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size={test_size}, random_state=42)\n"
+            "    stratify_y = y.iloc[:,0] if hasattr(y, 'columns') else y\n"
+            "    # Only stratify if every class has >= 2 samples\n"
+            "    import pandas as _pd\n"
+            "    _vc = _pd.Series(stratify_y).value_counts()\n"
+            "    _strat = stratify_y if _vc.min() >= 2 else None\n"
+            f"    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size={test_size}, random_state=42, stratify=_strat)\n"
             "    target_name = target_cols[0] if isinstance(target_cols, list) else target_cols\n"
             "    y_train_single = y_train[target_name] if hasattr(y_train, 'columns') else y_train\n"
             "    y_test_single = y_test[target_name] if hasattr(y_test, 'columns') else y_test\n"
