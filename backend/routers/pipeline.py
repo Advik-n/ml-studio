@@ -121,6 +121,12 @@ async def configure_and_run(
             detail=f"Dataset '{config.dataset_filename}' not found. Upload it first.",
         )
 
+    target_value = (
+        json.dumps(config.target_column)
+        if isinstance(config.target_column, list)
+        else (config.target_column or None)
+    )
+
     job = PipelineJob(
         project_id=project_id,
         dataset_filename=config.dataset_filename,
@@ -128,7 +134,7 @@ async def configure_and_run(
         model_name=config.model_name,
         transformers=json.dumps(config.transformers),
         test_size=config.test_size,
-        target_column=json.dumps(config.target_column) if config.target_column is not None else None,
+        target_column=target_value,
         feature_columns=json.dumps(config.feature_columns) if config.feature_columns else None,
         hyperparams=json.dumps(config.hyperparams) if config.hyperparams else None,
         status="pending",
