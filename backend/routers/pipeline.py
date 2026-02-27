@@ -109,6 +109,9 @@ async def configure_and_run(
     db: Session = Depends(get_db),
 ):
     """Configure an ML pipeline and start training in the background."""
+    logger.info("Pipeline configure request: model_type=%s, model_name=%s, dataset=%s, target=%s, features=%s",
+                config.model_type, config.model_name, config.dataset_filename,
+                config.target_column, config.feature_columns[:3] if config.feature_columns else None)
     project = db.query(Project).filter(
         Project.id == project_id, Project.user_id == current_user.id
     ).first()
@@ -149,6 +152,13 @@ async def configure_and_run(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Target columns cannot be used as features: {sorted(overlap)}",
+            )
+    if config.model_type == "nlp":
+        obj_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+        if not obj_cols:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="NLP task requires at least one text (object/string) column in the dataset. This dataset has only numeric columns — try Classification or Regression instead.",
             )
 
     target_value = (

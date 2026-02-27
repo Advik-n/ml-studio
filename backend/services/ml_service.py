@@ -233,6 +233,13 @@ async def build_and_run_pipeline(
             logger.info("Detected non-numeric target for regression; switching to classification.")
             model_type = "classification"
 
+    # Auto-correct classification with continuous numeric target → regression
+    if model_type == "classification" and y is not None:
+        _y_check = y.iloc[:, 0] if isinstance(y, pd.DataFrame) else y
+        if pd.api.types.is_float_dtype(_y_check) and _y_check.nunique() > 20:
+            logger.info("Detected continuous numeric target for classification; switching to regression.")
+            model_type = "regression"
+
     # Build preprocessing pipeline
     if model_type == "nlp":
         # NLP pipeline: identify text column(s), use TF-IDF
@@ -835,8 +842,35 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
     if not registry:
         raise ValueError(f"No models registered for model_type '{model_type}'.")
 
+    # Fallback: if model not found (e.g., auto-switch classification→regression),
+    # try to find an equivalent in the new registry
     if model_name not in registry:
-        raise ValueError(f"Unknown model '{model_name}' for model_type '{model_type}'. Allowed: {list(registry.keys())}")
+        _CROSS_TASK_FALLBACK = {
+            "RandomForest": "RandomForestRegressor",
+            "GradientBoosting": "GradientBoostingRegressor",
+            "SVM": "SVR",
+            "DecisionTree": "DecisionTreeRegressor",
+            "KNN": "Ridge",
+            "NaiveBayes": "Ridge",
+            "LogisticRegression": "LinearRegression",
+            "RandomForestRegressor": "RandomForest",
+            "GradientBoostingRegressor": "GradientBoosting",
+            "SVR": "SVM",
+            "DecisionTreeRegressor": "DecisionTree",
+            "LinearRegression": "LogisticRegression",
+            "Ridge": "LogisticRegression",
+            "Lasso": "LogisticRegression",
+            "ElasticNet": "LogisticRegression",
+        }
+        fallback = _CROSS_TASK_FALLBACK.get(model_name)
+        if fallback and fallback in registry:
+            logger.info("Model '%s' not available for %s; falling back to '%s'.", model_name, model_type, fallback)
+            model_name = fallback
+        else:
+            # Last resort: use first model in registry
+            fallback = next(iter(registry))
+            logger.info("Model '%s' not available for %s; defaulting to '%s'.", model_name, model_type, fallback)
+            model_name = fallback
 
     # Clone to avoid mutating the shared global registry instance
     estimator = clone(registry[model_name])

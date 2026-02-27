@@ -280,10 +280,10 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
     );
   };
 
-  const toggleTarget = (col: string) => {
-    setTargetColumns((prev) =>
-      prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]
-    );
+  const selectTarget = (col: string) => {
+    setTargetColumns([col]);
+    // Auto-remove target from features to prevent overlap
+    setFeatureColumns((prev) => prev.filter((c) => c !== col));
   };
 
   const handleModelChange = (model: string) => {
@@ -298,11 +298,13 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
   const handleRun = async () => {
     setRunning(true);
     try {
+      // Safety: ensure target is not in features
+      const safeFeatures = featureColumns.filter((c) => !targetColumns.includes(c));
       const config: PipelineConfig = {
         dataset_filename: datasetFilename,
         model_type: taskType,
         model_name: modelName,
-        feature_columns: featureColumns,
+        feature_columns: safeFeatures,
         target_column: taskType !== "clustering" ? targetColumns : undefined,
         test_size: taskType !== "clustering" ? testSize : undefined,
         transformers: selectedTransformers,
@@ -319,8 +321,9 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
       const jobResponse = await api.post<PipelineJob>(`/pipeline/${projectId}/configure`, config);
       toast.success("Pipeline started!");
       onJobCreated(jobResponse.data);
-    } catch {
-      toast.error("Failed to start pipeline.");
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || "Failed to start pipeline.");
     } finally {
       setRunning(false);
     }
@@ -429,7 +432,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                     <button
                       key={col}
                       type="button"
-                      onClick={() => setTargetColumns([col])}
+                      onClick={() => selectTarget(col)}
                       className={`rounded-full border px-3 py-1 text-xs transition-all ${
                         targetColumns.includes(col)
                           ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"
@@ -457,7 +460,7 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
                 <button
                   key={col}
                   type="button"
-                  onClick={() => setTargetColumns([col])}
+                  onClick={() => selectTarget(col)}
                   className={`rounded-full border px-3 py-1 text-xs transition-all ${
                     targetColumns.includes(col)
                       ? "border-purple-500 bg-purple-500/15 text-purple-600 dark:text-purple-300"

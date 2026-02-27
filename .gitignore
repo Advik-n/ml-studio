@@ -32,3 +32,4 @@ Thumbs.db
 *.log
 __pycache__/
 test_ml_service.py
+backend/test_debug.db
