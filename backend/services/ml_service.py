@@ -990,7 +990,7 @@ def _build_pipeline_notebook(
     ))
 
     cells.append(new_markdown_cell("## Evaluation Metrics"))
-    metrics_repr = json.dumps(metrics, indent=2)
+    metrics_repr = repr(metrics)
     cells.append(new_code_cell(
         f"metrics = {metrics_repr}\n"
         "import json\n"
