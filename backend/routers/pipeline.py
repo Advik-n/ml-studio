@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import List
 
 import aiofiles
@@ -84,22 +85,31 @@ async def upload_dataset(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
-    ext = os.path.splitext(file.filename or "")[-1].lower()
+    safe_name = PurePosixPath(file.filename or "upload").name
+    ext = os.path.splitext(safe_name)[-1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file type '{ext}'.",
         )
 
+    # Enforce file size limit
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    contents = await file.read()
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum allowed size is {settings.MAX_UPLOAD_SIZE_MB} MB.",
+        )
+
     uploads_dir = os.path.join(project.folder_path, "datasets")
     os.makedirs(uploads_dir, exist_ok=True)
-    dest_path = os.path.join(uploads_dir, file.filename)
+    dest_path = os.path.join(uploads_dir, safe_name)
 
     async with aiofiles.open(dest_path, "wb") as out_file:
-        while chunk := await file.read(1024 * 1024):
-            await out_file.write(chunk)
+        await out_file.write(contents)
 
-    return {"filename": file.filename, "path": dest_path, "message": "Dataset uploaded successfully."}
+    return {"filename": safe_name, "path": dest_path, "message": "Dataset uploaded successfully."}
 
 
 @router.post("/{project_id}/configure", response_model=PipelineJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -271,7 +281,8 @@ def make_prediction(
     try:
         result = predict(job.model_path, payload.features, job.model_type or "classification", feature_columns)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        logger.exception("Prediction failed for job %s: %s", job_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prediction failed due to an internal error.")
 
     return result
 

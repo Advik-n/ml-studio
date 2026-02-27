@@ -73,7 +73,7 @@ def send_verification_email(email: str, code: str) -> None:
     if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
         logger.info("=== EMAIL VERIFICATION (dev mode) ===")
         logger.info("To: %s | Code: %s", email, code)
-        print(f"\n[DEV] Verification code for {email}: {code}\n")
+        logger.debug("Verification code for %s: %s", email, code)
         return
 
     html_body = f"""
@@ -104,4 +104,4 @@ def send_verification_email(email: str, code: str) -> None:
     except Exception as exc:
         logger.error("Failed to send verification email to %s: %s", email, exc)
         # Fall back to console so the user can still verify in dev
-        print(f"\n[FALLBACK] Verification code for {email}: {code}\n")
+        logger.warning("SMTP failed; verification code for %s: %s", email, code)

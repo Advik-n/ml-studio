@@ -2,6 +2,7 @@
 import logging
 import os
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import List
 
 import aiofiles
@@ -78,24 +79,33 @@ async def upload_for_eda(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
-    ext = os.path.splitext(file.filename or "")[-1].lower()
+    safe_name = PurePosixPath(file.filename or "upload").name
+    ext = os.path.splitext(safe_name)[-1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
+    # Enforce file size limit
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    contents = await file.read()
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum allowed size is {settings.MAX_UPLOAD_SIZE_MB} MB.",
+        )
+
     # Persist uploaded file
     uploads_dir = os.path.join(project.folder_path, "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
-    dest_path = os.path.join(uploads_dir, file.filename)
+    dest_path = os.path.join(uploads_dir, safe_name)
     async with aiofiles.open(dest_path, "wb") as out_file:
-        while chunk := await file.read(1024 * 1024):  # 1 MB chunks
-            await out_file.write(chunk)
+        await out_file.write(contents)
 
     job = EDAJob(
         project_id=project_id,
-        input_filename=file.filename,
+        input_filename=safe_name,
         status="pending",
     )
     db.add(job)

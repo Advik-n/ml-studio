@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./ml_studio.db"
     MAX_USERS: int = 10000
     UPLOAD_DIR: str = "./uploads"
+    MAX_UPLOAD_SIZE_MB: int = 100
 
     # SMTP settings (optional — if not set, codes are printed to console)
     SMTP_HOST: Optional[str] = None
