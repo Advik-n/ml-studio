@@ -49,7 +49,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,6 +85,5 @@ def health():
     """Detailed health check."""
     return {
         "status": "ok",
-        "database": settings.DATABASE_URL,
-        "upload_dir": settings.UPLOAD_DIR,
+        "version": "1.0.0",
     }
