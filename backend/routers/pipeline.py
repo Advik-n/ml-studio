@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import shutil
 from datetime import datetime
 from typing import List
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
+from models.eda_job import EDAJob
 from models.pipeline_job import PipelineJob
 from models.project import Project
 from models.user import User
@@ -124,12 +126,28 @@ async def configure_and_run(
             detail=f"Unsupported model_type '{config.model_type}'. Allowed: {sorted(ALLOWED_MODEL_TYPES)}",
         )
 
-    dataset_path = os.path.join(project.folder_path, "datasets", config.dataset_filename)
-    if not os.path.exists(dataset_path):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Dataset '{config.dataset_filename}' not found. Upload it first.",
-        )
+    # If eda_job_id provided, copy cleaned data from EDA job
+    if config.eda_job_id:
+        eda_job = db.query(EDAJob).filter(EDAJob.id == config.eda_job_id).first()
+        if not eda_job:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EDA job not found.")
+        eda_csv = eda_job.cleaned_csv_path
+        if not eda_csv or not os.path.exists(eda_csv):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="EDA cleaned CSV not found.")
+        datasets_dir = os.path.join(project.folder_path, "datasets")
+        os.makedirs(datasets_dir, exist_ok=True)
+        dest_name = os.path.basename(eda_csv)
+        dest_path = os.path.join(datasets_dir, dest_name)
+        shutil.copy2(eda_csv, dest_path)
+        config.dataset_filename = dest_name
+        dataset_path = dest_path
+    else:
+        dataset_path = os.path.join(project.folder_path, "datasets", config.dataset_filename)
+        if not os.path.exists(dataset_path):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Dataset '{config.dataset_filename}' not found. Upload it first.",
+            )
 
     df = _read_dataset(dataset_path)
 

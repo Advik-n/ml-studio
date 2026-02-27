@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDropzone } from "react-dropzone";
 import {
@@ -175,9 +175,10 @@ const TASK_DESCRIPTIONS: Record<TaskType, string> = {
 interface PipelineBuilderProps {
   projectId: string;
   onJobCreated: (job: PipelineJob) => void;
+  edaJobId?: string;
 }
 
-export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBuilderProps) {
+export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: PipelineBuilderProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [running, setRunning] = useState(false);
@@ -193,6 +194,26 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
   const [targetColumns, setTargetColumns] = useState<string[]>([]);
   const [hyperparameters, setHyperparameters] = useState<Record<string, string | number | boolean>>({});
   const [datasetFilename, setDatasetFilename] = useState<string>("");
+
+  // Load columns from EDA cleaned dataset when edaJobId is provided
+  useEffect(() => {
+    if (!edaJobId) return;
+    (async () => {
+      try {
+        const res = await api.get(`/eda/jobs/${edaJobId}/data-summary`);
+        const details = res.data?.column_details as { name: string }[];
+        if (details?.length) {
+          const cols = details.map((d: { name: string }) => d.name);
+          setColumns(cols);
+          setFeatureColumns(cols.slice(0, -1));
+          setTargetColumns(cols.length > 0 ? [cols[cols.length - 1]] : []);
+          setDatasetFilename("cleaned_data.csv");
+        }
+      } catch {
+        // Will rely on manual upload
+      }
+    })();
+  }, [edaJobId]);
 
   // Dynamic steps based on task type
   const steps = useMemo(() => getStepsForTask(taskType), [taskType]);
@@ -309,9 +330,10 @@ export default function PipelineBuilder({ projectId, onJobCreated }: PipelineBui
         test_size: taskType !== "clustering" ? testSize : undefined,
         transformers: selectedTransformers,
         hyperparams: hyperparameters,
+        ...(edaJobId ? { eda_job_id: edaJobId } : {}),
       };
 
-      if (datasetFile) {
+      if (datasetFile && !edaJobId) {
         const formData = new FormData();
         formData.append("file", datasetFile);
         await api.post(`/pipeline/${projectId}/upload-dataset`, formData, {

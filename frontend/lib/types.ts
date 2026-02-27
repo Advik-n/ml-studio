@@ -68,6 +68,7 @@ export interface PipelineConfig {
   target_column?: string | string[];
   feature_columns?: string[];
   hyperparams?: Record<string, string | number | boolean>;
+  eda_job_id?: string;
 }
 
 export type TaskType = "classification" | "regression" | "clustering" | "nlp";

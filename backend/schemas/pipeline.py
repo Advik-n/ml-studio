@@ -16,6 +16,7 @@ class PipelineConfig(BaseModel):
     target_column: Optional[Union[str, List[str]]] = None
     feature_columns: Optional[List[str]] = None
     hyperparams: Optional[Dict[str, Any]] = None
+    eda_job_id: Optional[str] = None
 
 
 class PipelineJobResponse(BaseModel):

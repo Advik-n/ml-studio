@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   BarChart2,
   GitBranch,
+  Layers,
   ChevronLeft,
   ChevronRight,
   FolderOpen,
@@ -42,6 +43,12 @@ export default function Sidebar({ projectId, projectName, projectType = "mixed" 
       label: "ML Pipeline",
       icon: <GitBranch className="h-4 w-4 shrink-0" />,
       show: projectType === "pipeline" || projectType === "mixed",
+    },
+    {
+      href: `/projects/${projectId}/fullsuite`,
+      label: "Full Suite",
+      icon: <Layers className="h-4 w-4 shrink-0" />,
+      show: projectType === "mixed",
     },
   ].filter((l) => l.show);
 
