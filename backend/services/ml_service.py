@@ -203,6 +203,26 @@ async def build_and_run_pipeline(
     else:
         y = None
 
+    # Clean target: drop rows with NaN/inf in y
+    if y is not None:
+        if isinstance(y, pd.DataFrame):
+            y = y.replace([np.inf, -np.inf], np.nan)
+            valid_mask = y.notna().all(axis=1)
+        else:
+            y = pd.Series(y).replace([np.inf, -np.inf], np.nan)
+            valid_mask = y.notna()
+        n_dropped = int((~valid_mask).sum())
+        if n_dropped > 0:
+            logger.warning("Dropped %d rows with NaN/inf in target column(s).", n_dropped)
+            X = X.loc[valid_mask].reset_index(drop=True)
+            y = y.loc[valid_mask].reset_index(drop=True)
+        if len(y) == 0:
+            raise ValueError("All rows have NaN in target column — cannot train.")
+
+    # Clean features: replace inf with NaN (imputer will handle NaN)
+    if hasattr(X, 'replace'):
+        X = X.replace([np.inf, -np.inf], np.nan)
+
     # Auto-correct regression with categorical targets to classification
     if model_type == "regression" and y is not None:
         def _is_numeric(series: pd.Series) -> bool:
@@ -237,6 +257,11 @@ async def build_and_run_pipeline(
     # Encode target for classification / nlp if needed
     le: Any = None
     if y is not None and model_type in ("classification", "nlp"):
+        # Safety guard: ensure no NaN remains before LabelEncoder
+        if hasattr(y, 'isna') and (y.isna().any() if not isinstance(y, pd.DataFrame) else y.isna().any().any()):
+            valid = y.notna() if not isinstance(y, pd.DataFrame) else y.notna().all(axis=1)
+            X = X.loc[valid].reset_index(drop=True)
+            y = y.loc[valid].reset_index(drop=True)
         if multi_target and isinstance(y, pd.DataFrame):
             encoders: Dict[str, LabelEncoder] = {}
             for col in target_cols:
@@ -356,6 +381,8 @@ async def build_and_run_pipeline(
             vc = pd.Series(y).value_counts()
             if vc.min() >= 2:
                 stratify_target = y
+        if stratify_target is not None and pd.Series(stratify_target).isna().any():
+            stratify_target = None
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42, stratify=stratify_target
@@ -379,6 +406,19 @@ async def build_and_run_pipeline(
 
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
+
+        # Guard: drop any NaN/inf in predictions
+        if model_type == "regression" and hasattr(y_pred, '__len__'):
+            if isinstance(y_pred, np.ndarray) and y_pred.ndim == 1:
+                pred_valid = np.isfinite(y_pred)
+                if not np.all(pred_valid):
+                    y_test = y_test[pred_valid]
+                    y_pred = y_pred[pred_valid]
+            elif isinstance(y_pred, np.ndarray) and y_pred.ndim == 2:
+                pred_valid = np.isfinite(y_pred).all(axis=1)
+                if not np.all(pred_valid):
+                    y_test = y_test[pred_valid]
+                    y_pred = y_pred[pred_valid]
 
         if model_type in ("classification", "nlp"):
             if multi_target and isinstance(y_test, pd.DataFrame):
