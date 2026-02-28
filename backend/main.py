@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from config import settings
 from database import Base, engine
 from routers import auth, eda, pipeline, projects
+from routers.image import router as image_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +63,7 @@ app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(eda.router)
 app.include_router(pipeline.router)
+app.include_router(image_router)
 
 # ---------------------------------------------------------------------------
 # Static file serving for generated outputs

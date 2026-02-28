@@ -13,7 +13,7 @@ class ProjectCreate(BaseModel):
     @field_validator("project_type")
     @classmethod
     def validate_project_type(cls, v):
-        allowed = {"eda", "pipeline", "mixed"}
+        allowed = {"eda", "pipeline", "mixed", "image"}
         if v not in allowed:
             raise ValueError(f"project_type must be one of: {', '.join(sorted(allowed))}")
         return v
