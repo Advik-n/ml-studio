@@ -821,6 +821,19 @@ def _normalize_model_name(name: str, registry: dict) -> str:
         "DecisionTreeClassifier": "DecisionTree",
         "ElasticNet": "ElasticNet",
         "GaussianMixture": "GaussianMixture",
+        # snake_case aliases from various frontends
+        "random_forest": "RandomForest",
+        "gradient_boosting": "GradientBoosting",
+        "logistic_regression": "LogisticRegression",
+        "decision_tree": "DecisionTree",
+        "naive_bayes": "NaiveBayes",
+        "linear_regression": "LinearRegression",
+        "elastic_net": "ElasticNet",
+        "random_forest_regressor": "RandomForestRegressor",
+        "gradient_boosting_regressor": "GradientBoostingRegressor",
+        "decision_tree_regressor": "DecisionTreeRegressor",
+        "gaussian_mixture": "GaussianMixture",
+        "agglomerative_clustering": "AgglomerativeClustering",
     }
     aliased = _ALIASES.get(name, name)
     if aliased in registry:
