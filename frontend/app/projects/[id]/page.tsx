@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ExternalLink,
   Tag,
+  Eye,
 } from "lucide-react";
 import Navbar from "@/components/layout/navbar";
 import Sidebar from "@/components/layout/sidebar";
@@ -63,7 +64,7 @@ export default function ProjectPage() {
     <div className="min-h-screen bg-[var(--bg)]">
       <Navbar userName={user?.name || user?.username} />
       <div className="flex">
-        <Sidebar projectId={id} projectName={project.name} projectType={project.project_type as "eda" | "pipeline" | "mixed"} />
+        <Sidebar projectId={id} projectName={project.name} projectType={project.project_type as "eda" | "pipeline" | "mixed" | "image"} />
         <main className="flex-1 p-6 max-w-4xl">
           {/* Back + Header */}
           <div className="mb-6">
@@ -124,6 +125,26 @@ export default function ProjectPage() {
                 <BarChart2 className="h-6 w-6 text-blue-500" />
                 <span>Open Full Suite (EDA + Pipeline)</span>
               </Button>
+            )}
+            {project.project_type === "image" && (
+              <>
+                <Button
+                  variant="secondary"
+                  className="h-auto py-4 flex-col gap-2"
+                  onClick={() => router.push(`/projects/${id}/image-eda`)}
+                >
+                  <Eye className="h-6 w-6 text-orange-500" />
+                  <span>Image EDA</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="h-auto py-4 flex-col gap-2"
+                  onClick={() => router.push(`/projects/${id}/image-pipeline`)}
+                >
+                  <GitBranch className="h-6 w-6 text-purple-500" />
+                  <span>Image Pipeline</span>
+                </Button>
+              </>
             )}
           </div>
 

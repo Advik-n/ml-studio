@@ -8,6 +8,7 @@ import {
   BarChart2,
   GitBranch,
   Layers,
+  Image,
   CalendarDays,
   ExternalLink,
   Trash2,
@@ -22,6 +23,7 @@ const typeConfig = {
   eda: { label: "EDA", icon: <BarChart2 className="h-3.5 w-3.5" />, variant: "eda" as const },
   pipeline: { label: "Pipeline", icon: <GitBranch className="h-3.5 w-3.5" />, variant: "pipeline" as const },
   mixed: { label: "Full Suite", icon: <Layers className="h-3.5 w-3.5" />, variant: "mixed" as const },
+  image: { label: "Image", icon: <Image className="h-3.5 w-3.5" />, variant: "image" as const },
 };
 
 interface ProjectCardProps {
@@ -59,6 +61,8 @@ export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
               ? "bg-gradient-to-r from-blue-500 to-cyan-400"
               : project.project_type === "pipeline"
               ? "bg-gradient-to-r from-purple-500 to-violet-400"
+              : project.project_type === "image"
+              ? "bg-gradient-to-r from-orange-500 to-amber-400"
               : "bg-gradient-to-r from-emerald-500 to-teal-400"
           }`}
         />

@@ -12,7 +12,7 @@ export interface Project {
   id: string;
   name: string;
   description: string | null;
-  project_type: string; // "eda" | "pipeline" | "mixed"
+  project_type: string; // "eda" | "pipeline" | "mixed" | "image"
   folder_path: string;
   created_at: string;
   updated_at: string;
@@ -69,6 +69,29 @@ export interface PipelineConfig {
   feature_columns?: string[];
   hyperparams?: Record<string, string | number | boolean>;
   eda_job_id?: string;
+}
+
+export interface ImageJob {
+  id: string;
+  project_id: string;
+  job_type: "image_eda" | "image_pipeline";
+  status: "pending" | "processing" | "completed" | "failed";
+  total_images?: number;
+  num_classes?: number;
+  class_distribution?: Record<string, number>;
+  resolution_stats?: any;
+  rgb_stats?: any;
+  blur_scores?: any;
+  duplicate_count?: number;
+  eda_report?: any;
+  model_name?: string;
+  accuracy?: number;
+  metrics?: any;
+  confusion_matrix?: number[][];
+  training_history?: any;
+  error_message?: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export type TaskType = "classification" | "regression" | "clustering" | "nlp";

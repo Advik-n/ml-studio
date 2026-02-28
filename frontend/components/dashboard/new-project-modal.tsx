@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, BarChart2, GitBranch, Layers, FolderPlus } from "lucide-react";
+import { X, BarChart2, GitBranch, Layers, Image, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
@@ -41,13 +41,21 @@ const types = [
     color: "text-emerald-500 bg-emerald-500/10 border-emerald-500/30",
     selectedColor: "border-emerald-500 bg-emerald-500/15",
   },
+  {
+    value: "image" as const,
+    label: "Image Processing",
+    description: "Computer vision & image ML",
+    icon: <Image className="h-6 w-6" />,
+    color: "text-orange-500 bg-orange-500/10 border-orange-500/30",
+    selectedColor: "border-orange-500 bg-orange-500/15",
+  },
 ];
 
 export default function NewProjectModal({ open, onClose, onCreated }: NewProjectModalProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState<"eda" | "pipeline" | "mixed">("mixed");
+  const [type, setType] = useState<"eda" | "pipeline" | "mixed" | "image">("mixed");
   const [nameError, setNameError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -132,7 +140,7 @@ export default function NewProjectModal({ open, onClose, onCreated }: NewProject
 
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium text-[var(--text)]">Project Type</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {types.map((t) => (
                     <button
                       key={t.value}

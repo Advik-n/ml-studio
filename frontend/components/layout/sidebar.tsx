@@ -12,12 +12,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderOpen,
+  Eye,
 } from "lucide-react";
 
 interface SidebarProps {
   projectId: string;
   projectName: string;
-  projectType?: "eda" | "pipeline" | "mixed";
+  projectType?: "eda" | "pipeline" | "mixed" | "image";
 }
 
 export default function Sidebar({ projectId, projectName, projectType = "mixed" }: SidebarProps) {
@@ -49,6 +50,18 @@ export default function Sidebar({ projectId, projectName, projectType = "mixed" 
       label: "Full Suite",
       icon: <Layers className="h-4 w-4 shrink-0" />,
       show: projectType === "mixed",
+    },
+    {
+      href: `/projects/${projectId}/image-eda`,
+      label: "Image EDA",
+      icon: <Eye className="h-4 w-4 shrink-0" />,
+      show: projectType === "image",
+    },
+    {
+      href: `/projects/${projectId}/image-pipeline`,
+      label: "Image Pipeline",
+      icon: <GitBranch className="h-4 w-4 shrink-0" />,
+      show: projectType === "image",
     },
   ].filter((l) => l.show);
 

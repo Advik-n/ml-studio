@@ -8,8 +8,9 @@ import {
   Brain,
   LayoutDashboard,
   FolderOpen,
-  Sun,
-  Moon,
+  Image as ImageIcon,
+  Menu,
+  X,
   Palette,
   LogOut,
   Settings,
@@ -17,14 +18,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cycleTheme, getTheme, type Theme } from "@/lib/theme";
+import { getTheme, setTheme, THEMES, type Theme } from "@/lib/theme";
 import { logout } from "@/lib/auth";
-
-const themeIcons: Record<Theme, React.ReactNode> = {
-  dark: <Moon className="h-4 w-4" />,
-  light: <Sun className="h-4 w-4" />,
-  purple: <Palette className="h-4 w-4" />,
-};
 
 interface NavbarProps {
   userName?: string;
@@ -35,15 +30,12 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
   const router = useRouter();
   const [currentTheme, setCurrentTheme] = React.useState<Theme>("dark");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   React.useEffect(() => {
     setCurrentTheme(getTheme());
   }, []);
-
-  const handleThemeToggle = () => {
-    const next = cycleTheme();
-    setCurrentTheme(next);
-  };
 
   const handleLogout = () => {
     logout();
@@ -52,6 +44,7 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
     { href: "/projects", label: "Projects", icon: <FolderOpen className="h-4 w-4" /> },
+    { href: "/image-processing", label: "Img Processing", icon: <ImageIcon className="h-4 w-4" /> },
   ];
 
   return (
@@ -66,6 +59,14 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
             ML Studio
           </span>
         </Link>
+
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="md:hidden flex items-center justify-center h-9 w-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition-colors"
+        >
+          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
 
         {/* Nav Links */}
         <div className="hidden md:flex items-center gap-1">
@@ -90,14 +91,34 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
 
         {/* Right actions */}
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleThemeToggle}
-            title={`Current theme: ${currentTheme}`}
-          >
-            {themeIcons[currentTheme]}
-          </Button>
+          <div className="relative">
+            <Button variant="ghost" size="icon" onClick={() => setThemePickerOpen(!themePickerOpen)} title="Change theme">
+              <Palette className="h-4 w-4" />
+            </Button>
+            <AnimatePresence>
+              {themePickerOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-lg z-50"
+                >
+                  <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Theme</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {THEMES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => { setTheme(t.id); setCurrentTheme(t.id); setThemePickerOpen(false); }}
+                        title={t.label}
+                        className={`h-8 w-8 rounded-full border-2 transition-all ${currentTheme === t.id ? 'border-[var(--primary)] scale-110 ring-2 ring-[var(--primary)]/30' : 'border-transparent hover:scale-105'}`}
+                        style={{ backgroundColor: t.color }}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* User dropdown */}
           <div className="relative">
@@ -147,6 +168,39 @@ export default function Navbar({ userName = "User" }: NavbarProps) {
           </div>
         </div>
       </div>
+
+      {/* Mobile menu */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="md:hidden border-t border-[var(--border)] bg-[var(--surface)]"
+          >
+            <div className="px-4 py-2 space-y-1">
+              {navLinks.map((link) => {
+                const active = pathname.startsWith(link.href);
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      active
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    {link.icon}
+                    {link.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </nav>
   );
 }
