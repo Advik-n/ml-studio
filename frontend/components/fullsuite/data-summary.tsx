@@ -85,6 +85,87 @@ interface DataSummaryProps {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Backend → Frontend transform                                       */
+/* ------------------------------------------------------------------ */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function transformBackendResponse(raw: any): DataSummaryData {
+  // 1. dataset_info → overview
+  const overview = {
+    rows: raw.dataset_info.rows,
+    columns: raw.dataset_info.columns,
+    memory_mb: raw.dataset_info.memory_mb,
+    duplicates: raw.dataset_info.duplicates,
+  };
+
+  // 2. column_details pass-through (fields already match)
+  const column_details: ColumnDetail[] = (raw.column_details ?? []).map(
+    (c: any) => ({
+      name: c.name,
+      dtype: c.dtype,
+      missing_pct: c.missing_pct,
+      unique_count: c.unique_count,
+      sample_values: c.sample_values ?? [],
+    }),
+  );
+
+  // 3. numeric_stats dict → numeric_statistics array
+  const numeric_statistics: NumericStat[] = Object.entries(
+    raw.numeric_stats ?? {},
+  ).map(([col, s]: [string, any]) => ({
+    column: col,
+    mean: s.mean,
+    std: s.std,
+    min: s.min,
+    max: s.max,
+    skewness: s.skewness,
+    kurtosis: s.kurtosis,
+    outliers: s.outlier_count,
+  }));
+
+  // 4. categorical_stats dict → categorical_summary array
+  const categorical_summary: CategoricalColumn[] = Object.entries(
+    raw.categorical_stats ?? {},
+  ).map(([col, s]: [string, any]) => {
+    const valueCounts: Record<string, number> = s.value_counts ?? {};
+    const total = Object.values(valueCounts).reduce(
+      (sum: number, c) => sum + (c as number),
+      0,
+    );
+    return {
+      column: col,
+      top_values: Object.entries(valueCounts).map(([value, count]) => ({
+        value,
+        count: count as number,
+        pct: total > 0 ? ((count as number) / total) * 100 : 0,
+      })),
+    };
+  });
+
+  // 5. correlations: rename value → correlation
+  const top_correlations: CorrelationPair[] = (raw.correlations ?? []).map(
+    (p: any) => ({
+      col1: p.col1,
+      col2: p.col2,
+      correlation: p.value,
+    }),
+  );
+
+  return {
+    overview,
+    column_details,
+    numeric_statistics,
+    categorical_summary,
+    top_correlations,
+    recommendations: raw.recommendations ?? [],
+    target_suggestions: raw.target_suggestions ?? {
+      classification: [],
+      regression: [],
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -164,8 +245,8 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
       try {
         setLoading(true);
         setError(null);
-        const res = await api.get<DataSummaryData>(`/eda/jobs/${jobId}/data-summary`);
-        if (!cancelled) setData(res.data);
+        const res = await api.get(`/eda/jobs/${jobId}/data-summary`);
+        if (!cancelled) setData(transformBackendResponse(res.data));
       } catch (err: any) {
         if (!cancelled) {
           const msg = err?.response?.data?.detail || "Failed to load data summary.";

@@ -87,12 +87,11 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
   };
 
   const handleDownload = async (type: "notebook" | "report" | "cleaned" | "all") => {
-    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
     const urlMap = {
-      all: `${BASE}/eda/jobs/${job.id}/files/zip`,
-      notebook: `${BASE}/eda/jobs/${job.id}/files/notebook`,
-      report: `${BASE}/eda/jobs/${job.id}/files/docx`,
-      cleaned: `${BASE}/eda/jobs/${job.id}/files/cleaned`,
+      all: `/eda/jobs/${job.id}/files/zip`,
+      notebook: `/eda/jobs/${job.id}/files/notebook`,
+      report: `/eda/jobs/${job.id}/files/docx`,
+      cleaned: `/eda/jobs/${job.id}/files/cleaned`,
     } as const;
     const filenameMap = {
       all: `eda_${job.id}.zip`,
@@ -100,9 +99,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
       report: "eda_report.docx",
       cleaned: "cleaned_data.csv",
     } as const;
-    const url = urlMap[type];
-    const filename = filenameMap[type];
-    await downloadBlob(url, filename);
+    await downloadBlob(urlMap[type], filenameMap[type]);
   };
 
   return (

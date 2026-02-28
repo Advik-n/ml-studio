@@ -24,7 +24,7 @@ from utils.dependencies import require_verified_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/eda", tags=["EDA"])
 
-ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet"}
+ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet", ".data"}
 
 
 async def _run_eda_job(job_id: str, file_path: str, project_folder: str, db_url: str) -> None:

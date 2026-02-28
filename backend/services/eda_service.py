@@ -108,6 +108,7 @@ def _detect_file_format(filepath: str):
         ".xlsx": pd.read_excel,
         ".json": pd.read_json,
         ".parquet": pd.read_parquet,
+        ".data": pd.read_csv,
     }
     return mapping.get(ext, pd.read_csv)
 

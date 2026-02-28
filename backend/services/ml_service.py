@@ -642,9 +642,17 @@ def _read_dataset(path: str) -> pd.DataFrame:
         ".xlsx": pd.read_excel,
         ".json": pd.read_json,
         ".parquet": pd.read_parquet,
+        ".data": pd.read_csv,
     }
     reader = readers.get(ext, pd.read_csv)
-    return reader(path)
+    try:
+        df = reader(path)
+    except Exception as exc:
+        logger.error("Failed to read dataset %s: %s", path, exc)
+        raise ValueError(f"Could not read dataset file '{Path(path).name}': {exc}")
+    if df.empty:
+        raise ValueError(f"Dataset file '{Path(path).name}' is empty.")
+    return df
 
 
 def _build_preprocessing_pipeline(
@@ -877,10 +885,27 @@ def _get_estimator(model_type: str, model_name: str, hyperparams: Dict[str, Any]
 
     # Apply user hyperparams (use set_params to avoid creating a new instance)
     if hyperparams:
+        # Convert string values to appropriate types
+        converted = {}
+        for k, v in hyperparams.items():
+            if isinstance(v, str):
+                # Try int first, then float, keep string if neither
+                try:
+                    converted[k] = int(v)
+                except (ValueError, TypeError):
+                    try:
+                        converted[k] = float(v)
+                    except (ValueError, TypeError):
+                        if v.lower() in ('true', 'false'):
+                            converted[k] = v.lower() == 'true'
+                        else:
+                            converted[k] = v
+            else:
+                converted[k] = v
         try:
-            estimator.set_params(**hyperparams)
+            estimator.set_params(**converted)
         except Exception as exc:
-            logger.warning("Could not apply hyperparams %s: %s", hyperparams, exc)
+            logger.warning("Could not apply hyperparams %s: %s", converted, exc)
 
     return estimator
 

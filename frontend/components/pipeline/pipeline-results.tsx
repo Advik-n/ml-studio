@@ -79,8 +79,7 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
 
   const handleDownloadNotebook = async () => {
     if (!job.notebook_path) { toast.error("Notebook not available."); return; }
-    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
-    await downloadBlob(`${BASE}/pipeline/jobs/${job.id}/download-notebook`, `pipeline_${job.id}.ipynb`);
+    await downloadBlob(`/pipeline/jobs/${job.id}/download-notebook`, `pipeline_${job.id}.ipynb`);
   };
 
   const parsedMetrics = job.metrics ? JSON.parse(job.metrics) : null;

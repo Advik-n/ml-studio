@@ -25,7 +25,7 @@ from utils.dependencies import require_verified_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline", tags=["Pipeline"])
 
-ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet"}
+ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet", ".data"}
 ALLOWED_MODEL_TYPES = {"classification", "regression", "clustering", "nlp"}
 
 

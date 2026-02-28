@@ -246,8 +246,9 @@ export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: P
       "application/vnd.ms-excel": [".xls"],
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
       "application/json": [".json"],
-      "application/octet-stream": [".parquet"],
+      "application/octet-stream": [".parquet", ".data"],
       "application/x-parquet": [".parquet"],
+      "text/plain": [".data"],
     },
     maxFiles: 1,
   });
