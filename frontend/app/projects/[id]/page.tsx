@@ -95,7 +95,7 @@ export default function ProjectPage() {
 
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-3 mb-8">
-            {(project.project_type === "eda" || project.project_type === "mixed") && (
+            {project.project_type === "eda" && (
               <Button
                 variant="secondary"
                 className="h-auto py-4 flex-col gap-2"
@@ -105,7 +105,7 @@ export default function ProjectPage() {
                 <span>Open EDA Tool</span>
               </Button>
             )}
-            {(project.project_type === "pipeline" || project.project_type === "mixed") && (
+            {project.project_type === "pipeline" && (
               <Button
                 variant="secondary"
                 className="h-auto py-4 flex-col gap-2"
@@ -113,6 +113,16 @@ export default function ProjectPage() {
               >
                 <GitBranch className="h-6 w-6 text-purple-500" />
                 <span>Open ML Pipeline</span>
+              </Button>
+            )}
+            {project.project_type === "mixed" && (
+              <Button
+                variant="secondary"
+                className="h-auto py-4 flex-col gap-2 col-span-2"
+                onClick={() => router.push(`/projects/${id}/fullsuite`)}
+              >
+                <BarChart2 className="h-6 w-6 text-blue-500" />
+                <span>Open Full Suite (EDA + Pipeline)</span>
               </Button>
             )}
           </div>

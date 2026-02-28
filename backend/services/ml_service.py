@@ -636,15 +636,15 @@ def _read_dataset(path: str) -> pd.DataFrame:
     """Read a dataset from *path* using an appropriate pandas reader."""
     ext = Path(path).suffix.lower()
     readers = {
-        ".csv": pd.read_csv,
+        ".csv": lambda p: pd.read_csv(p, sep=None, engine="python"),
         ".tsv": lambda p: pd.read_csv(p, sep="\t"),
         ".xls": pd.read_excel,
         ".xlsx": pd.read_excel,
         ".json": pd.read_json,
         ".parquet": pd.read_parquet,
-        ".data": pd.read_csv,
+        ".data": lambda p: pd.read_csv(p, header=None, sep=None, engine="python"),
     }
-    reader = readers.get(ext, pd.read_csv)
+    reader = readers.get(ext, lambda p: pd.read_csv(p, sep=None, engine="python"))
     try:
         df = reader(path)
     except Exception as exc:
@@ -652,6 +652,9 @@ def _read_dataset(path: str) -> pd.DataFrame:
         raise ValueError(f"Could not read dataset file '{Path(path).name}': {exc}")
     if df.empty:
         raise ValueError(f"Dataset file '{Path(path).name}' is empty.")
+    # Auto-name columns for headerless files (like .data)
+    if all(isinstance(c, int) for c in df.columns):
+        df.columns = [f"feature_{i}" if i < len(df.columns) - 1 else "target" for i in range(len(df.columns))]
     return df
 
 

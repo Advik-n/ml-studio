@@ -102,15 +102,15 @@ def _detect_file_format(filepath: str):
     """Return the appropriate pandas read function based on file extension."""
     ext = Path(filepath).suffix.lower()
     mapping = {
-        ".csv": pd.read_csv,
+        ".csv": lambda p: pd.read_csv(p, sep=None, engine="python"),
         ".tsv": lambda p: pd.read_csv(p, sep="\t"),
         ".xls": pd.read_excel,
         ".xlsx": pd.read_excel,
         ".json": pd.read_json,
         ".parquet": pd.read_parquet,
-        ".data": pd.read_csv,
+        ".data": lambda p: pd.read_csv(p, header=None, sep=None, engine="python"),
     }
-    return mapping.get(ext, pd.read_csv)
+    return mapping.get(ext, lambda p: pd.read_csv(p, sep=None, engine="python"))
 
 
 def _read_file(filepath: str) -> pd.DataFrame:
@@ -120,6 +120,9 @@ def _read_file(filepath: str) -> pd.DataFrame:
     # Flatten multi-index columns (e.g., from some Excel files)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = ["_".join(str(c) for c in col).strip() for col in df.columns]
+    # Auto-name columns for headerless files (like .data)
+    if all(isinstance(c, int) for c in df.columns):
+        df.columns = [f"feature_{i}" if i < len(df.columns) - 1 else "target" for i in range(len(df.columns))]
     return df
 
 

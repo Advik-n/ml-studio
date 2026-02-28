@@ -256,7 +256,7 @@ export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: P
   // Step completion check
   const isStepComplete = (sid: StepId): boolean => {
     switch (sid) {
-      case "dataset": return !!datasetFile;
+      case "dataset": return !!datasetFile || (!!edaJobId && columns.length > 0);
       case "task": return !!taskType;
       case "target":
         if (taskType === "nlp") return featureColumns.length > 0 && targetColumns.length > 0;
@@ -363,6 +363,19 @@ export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: P
     switch (currentStepId) {
       // ── Dataset ──
       case "dataset":
+        if (edaJobId && columns.length > 0) {
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+                <Check className="h-5 w-5 text-emerald-500 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Using cleaned dataset from EDA analysis</p>
+                  <p className="text-xs text-[var(--text-muted)]">{datasetFilename} · {columns.length} columns detected</p>
+                </div>
+              </div>
+            </div>
+          );
+        }
         return (
           <div className="space-y-4">
             <div
