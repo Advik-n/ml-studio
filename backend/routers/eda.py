@@ -290,8 +290,8 @@ def get_data_summary(
     dataset_info = {
         "rows": len(df),
         "columns": len(df.columns),
-        "memory_mb": round(df.memory_usage(deep=True).sum() / (1024 * 1024), 2),
-        "duplicates": int(df.duplicated().sum()),
+        "memory_mb": round(df.memory_usage(deep=True).sum() / (1024 * 1024), 2) or 0,
+        "duplicates": int(df.duplicated().sum()) if len(df) > 0 else 0,
     }
 
     # Column details
@@ -301,6 +301,7 @@ def get_data_summary(
         dtype = _classify_dtype(df[col])
         col_types[col] = dtype
         missing_count = int(df[col].isna().sum())
+        missing_pct = round(missing_count / max(len(df), 1) * 100, 2)
         sample_vals = df[col].dropna().unique()[:5].tolist()
         # Make sample values JSON-serializable
         sample_vals = [str(v) if not isinstance(v, (int, float, str, bool)) else v for v in sample_vals]
@@ -308,7 +309,7 @@ def get_data_summary(
             "name": col,
             "dtype": dtype,
             "missing_count": missing_count,
-            "missing_pct": round(missing_count / max(len(df), 1) * 100, 2),
+            "missing_pct": missing_pct if missing_pct is not None else 0,
             "unique_count": int(df[col].nunique()),
             "sample_values": sample_vals,
         })
@@ -336,7 +337,7 @@ def get_data_summary(
             "kurtosis": _safe_float(s.kurtosis()),
             "q1": q1,
             "q3": q3,
-            "outlier_count": outlier_count,
+            "outlier_count": outlier_count or 0,
         }
 
     # Categorical stats
@@ -346,7 +347,7 @@ def get_data_summary(
         vc = df[col].value_counts()
         categorical_stats[col] = {
             "unique_count": int(df[col].nunique()),
-            "top_value": str(vc.index[0]) if len(vc) > 0 else None,
+            "top_value": str(vc.index[0]) if len(vc) > 0 else "",
             "top_frequency": int(vc.iloc[0]) if len(vc) > 0 else 0,
             "value_counts": {str(k): int(v) for k, v in vc.head(10).items()},
         }

@@ -90,44 +90,45 @@ interface DataSummaryProps {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function transformBackendResponse(raw: any): DataSummaryData {
-  // 1. dataset_info → overview
+  // 1. dataset_info → overview (defensive defaults for null/undefined)
+  const info = raw.dataset_info ?? raw.overview ?? {};
   const overview = {
-    rows: raw.dataset_info.rows,
-    columns: raw.dataset_info.columns,
-    memory_mb: raw.dataset_info.memory_mb,
-    duplicates: raw.dataset_info.duplicates,
+    rows: info.rows ?? 0,
+    columns: info.columns ?? 0,
+    memory_mb: info.memory_mb ?? 0,
+    duplicates: info.duplicates ?? 0,
   };
 
-  // 2. column_details pass-through (fields already match)
+  // 2. column_details with defaults
   const column_details: ColumnDetail[] = (raw.column_details ?? []).map(
     (c: any) => ({
-      name: c.name,
-      dtype: c.dtype,
-      missing_pct: c.missing_pct,
-      unique_count: c.unique_count,
+      name: c.name ?? 'unknown',
+      dtype: c.dtype ?? 'unknown',
+      missing_pct: c.missing_pct ?? 0,
+      unique_count: c.unique_count ?? 0,
       sample_values: c.sample_values ?? [],
     }),
   );
 
-  // 3. numeric_stats dict → numeric_statistics array
+  // 3. numeric_stats dict → numeric_statistics array (defaults for every numeric field)
   const numeric_statistics: NumericStat[] = Object.entries(
     raw.numeric_stats ?? {},
   ).map(([col, s]: [string, any]) => ({
     column: col,
-    mean: s.mean,
-    std: s.std,
-    min: s.min,
-    max: s.max,
-    skewness: s.skewness,
-    kurtosis: s.kurtosis,
-    outliers: s.outlier_count,
+    mean: s?.mean ?? 0,
+    std: s?.std ?? 0,
+    min: s?.min ?? 0,
+    max: s?.max ?? 0,
+    skewness: s?.skewness ?? 0,
+    kurtosis: s?.kurtosis ?? 0,
+    outliers: s?.outlier_count ?? s?.outliers ?? 0,
   }));
 
-  // 4. categorical_stats dict → categorical_summary array
+  // 4. categorical_stats dict → categorical_summary array (defaults)
   const categorical_summary: CategoricalColumn[] = Object.entries(
     raw.categorical_stats ?? {},
   ).map(([col, s]: [string, any]) => {
-    const valueCounts: Record<string, number> = s.value_counts ?? {};
+    const valueCounts: Record<string, number> = s?.value_counts ?? {};
     const total = Object.values(valueCounts).reduce(
       (sum: number, c) => sum + (c as number),
       0,
@@ -142,12 +143,12 @@ function transformBackendResponse(raw: any): DataSummaryData {
     };
   });
 
-  // 5. correlations: rename value → correlation
+  // 5. correlations: rename value → correlation (null guard)
   const top_correlations: CorrelationPair[] = (raw.correlations ?? []).map(
     (p: any) => ({
-      col1: p.col1,
-      col2: p.col2,
-      correlation: p.value,
+      col1: p?.col1 ?? '',
+      col2: p?.col2 ?? '',
+      correlation: p?.value ?? p?.correlation ?? 0,
     }),
   );
 
@@ -308,7 +309,7 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
         {[
           { label: "Rows", value: formatNumber(overview.rows), icon: Database, color: "text-blue-400" },
           { label: "Columns", value: overview.columns, icon: Columns3, color: "text-emerald-400" },
-          { label: "Memory", value: `${overview.memory_mb.toFixed(1)} MB`, icon: HardDrive, color: "text-purple-400" },
+          { label: "Memory", value: `${(overview.memory_mb ?? 0).toFixed(1)} MB`, icon: HardDrive, color: "text-purple-400" },
           { label: "Duplicates", value: formatNumber(overview.duplicates), icon: Copy, color: "text-amber-400" },
         ].map((stat) => (
           <div
@@ -347,7 +348,7 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
                   </td>
                   <td className="py-2 pr-4">
                     <span className={col.missing_pct > 20 ? "text-red-400 font-medium" : "text-[var(--text-muted)]"}>
-                      {col.missing_pct.toFixed(1)}%
+                      {(col.missing_pct ?? 0).toFixed(1)}%
                     </span>
                   </td>
                   <td className="py-2 pr-4 text-[var(--text-muted)]">{formatNumber(col.unique_count)}</td>
@@ -390,16 +391,16 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
                   {numeric_statistics.map((s) => (
                     <tr key={s.column} className="border-b border-[var(--border)]/50">
                       <td className="py-2 pr-3 font-medium text-[var(--text)]">{s.column}</td>
-                      <td className="py-2 pr-3 text-[var(--text-muted)]">{s.mean.toFixed(2)}</td>
-                      <td className="py-2 pr-3 text-[var(--text-muted)]">{s.std.toFixed(2)}</td>
-                      <td className="py-2 pr-3 text-[var(--text-muted)]">{s.min.toFixed(2)}</td>
-                      <td className="py-2 pr-3 text-[var(--text-muted)]">{s.max.toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-muted)]">{(s.mean ?? 0).toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-muted)]">{(s.std ?? 0).toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-muted)]">{(s.min ?? 0).toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-muted)]">{(s.max ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-3">
-                        <span className={Math.abs(s.skewness) > 1 ? "text-amber-400 font-medium" : "text-[var(--text-muted)]"}>
-                          {s.skewness.toFixed(2)}
+                        <span className={Math.abs(s.skewness ?? 0) > 1 ? "text-amber-400 font-medium" : "text-[var(--text-muted)]"}>
+                          {(s.skewness ?? 0).toFixed(2)}
                         </span>
                       </td>
-                      <td className="py-2 pr-3 text-[var(--text-muted)]">{s.kurtosis.toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-muted)]">{(s.kurtosis ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-3">
                         <span className={s.outliers > 50 ? "text-red-400 font-medium" : "text-[var(--text-muted)]"}>
                           {s.outliers}
@@ -431,7 +432,7 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between text-xs mb-0.5">
                           <span className="truncate text-[var(--text-muted)]">{tv.value}</span>
-                          <span className="text-[var(--text-muted)] shrink-0 ml-1">{tv.pct.toFixed(1)}%</span>
+                          <span className="text-[var(--text-muted)] shrink-0 ml-1">{(tv.pct ?? 0).toFixed(1)}%</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
                           <div
@@ -467,7 +468,7 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
                   />
                 </div>
                 <span className="text-xs font-mono text-[var(--text-muted)] w-12 text-right shrink-0">
-                  {pair.correlation.toFixed(3)}
+                  {(pair.correlation ?? 0).toFixed(3)}
                 </span>
               </div>
             ))}
