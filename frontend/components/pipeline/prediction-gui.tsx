@@ -159,13 +159,13 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-[var(--text-muted)]">
                       <span>Confidence</span>
-                      <span>{(result.confidence * 100).toFixed(1)}%</span>
+                      <span>{((result.confidence ?? 0) * 100).toFixed(1)}%</span>
                     </div>
                     <div className="h-2.5 rounded-full bg-[var(--border)] overflow-hidden">
                       <motion.div
                         className="h-full rounded-full bg-gradient-to-r from-[var(--primary)] to-[var(--accent)]"
                         initial={{ width: 0 }}
-                        animate={{ width: `${result.confidence * 100}%` }}
+                        animate={{ width: `${(result.confidence ?? 0) * 100}%` }}
                         transition={{ duration: 0.6 }}
                       />
                     </div>
@@ -185,14 +185,14 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
                               {cls}
                             </span>
                             <span className={prob === maxProb ? "text-[var(--primary)] font-bold" : "text-[var(--text-muted)]"}>
-                              {(prob * 100).toFixed(1)}%
+                              {((prob ?? 0) * 100).toFixed(1)}%
                             </span>
                           </div>
                           <div className="h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
                             <motion.div
                               className={`h-full rounded-full ${prob === maxProb ? "bg-[var(--primary)]" : "bg-[var(--border)]"}`}
                               initial={{ width: 0 }}
-                              animate={{ width: `${prob * 100}%` }}
+                              animate={{ width: `${(prob ?? 0) * 100}%` }}
                               transition={{ duration: 0.5 }}
                             />
                           </div>

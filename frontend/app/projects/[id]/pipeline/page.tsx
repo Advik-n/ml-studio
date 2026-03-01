@@ -35,9 +35,10 @@ export default function PipelinePage() {
       ]);
       setUser(userData);
       setProject(projRes.data);
-      setPipelineJobs(pipeRes.data);
+      const jobs = Array.isArray(pipeRes.data) ? pipeRes.data : [];
+      setPipelineJobs(jobs);
       // Set most recent active job
-      const latest = pipeRes.data[0];
+      const latest = jobs[0];
       if (latest && (latest.status === "processing" || latest.status === "completed")) {
         setActiveJob(latest);
       }

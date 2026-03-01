@@ -62,11 +62,12 @@ export default function ImagePipelinePage() {
       } else {
         try {
           const jobsRes = await api.get(`/image/${id}/jobs`);
-          const edaJobs = jobsRes.data.filter((j: any) => j.job_type === "image_eda" && j.status === "completed");
+          const jobsList = Array.isArray(jobsRes.data) ? jobsRes.data : [];
+          const edaJobs = jobsList.filter((j: any) => j.job_type === "image_eda" && j.status === "completed");
           if (edaJobs.length > 0) setEdaJobId(edaJobs[0].id);
 
           // Check for existing pipeline results
-          const pipJobs = jobsRes.data.filter((j: any) => j.job_type === "image_pipeline" && j.status === "completed");
+          const pipJobs = jobsList.filter((j: any) => j.job_type === "image_pipeline" && j.status === "completed");
           if (pipJobs.length > 0) {
             setResult(pipJobs[0]);
           }
@@ -260,13 +261,13 @@ export default function ImagePipelinePage() {
                               </tr>
                             </thead>
                             <tbody>
-                              {Object.entries(result.metrics.per_class_metrics).map(([cls, m]: [string, any]) => (
+                              {Object.entries(result.metrics.per_class_metrics || {}).map(([cls, m]: [string, any]) => (
                                 <tr key={cls} className="border-b border-[var(--border)]/50">
                                   <td className="py-2 pr-4 font-medium text-[var(--text)]">{cls}</td>
-                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(m.precision * 100).toFixed(1)}%</td>
-                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(m.recall * 100).toFixed(1)}%</td>
-                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(m.f1 * 100).toFixed(1)}%</td>
-                                  <td className="py-2 text-[var(--text-muted)]">{m.support}</td>
+                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(((m?.precision ?? 0)) * 100).toFixed(1)}%</td>
+                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(((m?.recall ?? 0)) * 100).toFixed(1)}%</td>
+                                  <td className="py-2 pr-4 text-[var(--text-muted)]">{(((m?.f1 ?? 0)) * 100).toFixed(1)}%</td>
+                                  <td className="py-2 text-[var(--text-muted)]">{m?.support ?? 0}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -288,7 +289,7 @@ export default function ImagePipelinePage() {
                             <thead>
                               <tr>
                                 <th className="p-2 text-xs text-[var(--text-muted)]"></th>
-                                {(result.class_distribution ? Object.keys(result.class_distribution) : []).map((cls: string) => (
+                                {(result.class_names || (result.class_distribution ? Object.keys(result.class_distribution) : [])).map((cls: string) => (
                                   <th key={cls} className="p-2 text-xs text-[var(--text-muted)] text-center">{cls.slice(0, 10)}</th>
                                 ))}
                               </tr>
@@ -297,7 +298,7 @@ export default function ImagePipelinePage() {
                               {result.confusion_matrix.map((row: number[], i: number) => (
                                 <tr key={i}>
                                   <td className="p-2 text-xs font-medium text-[var(--text)]">
-                                    {(result.class_distribution ? Object.keys(result.class_distribution) : [])[i]?.slice(0, 10)}
+                                    {(result.class_names || (result.class_distribution ? Object.keys(result.class_distribution) : []))[i]?.slice(0, 10)}
                                   </td>
                                   {row.map((val: number, j: number) => {
                                     const maxVal = Math.max(...row);
@@ -348,7 +349,7 @@ export default function ImagePipelinePage() {
                     <XCircle className="h-5 w-5 text-red-500 shrink-0" />
                     <div>
                       <p className="font-medium text-red-400">Training Failed</p>
-                      <p className="text-sm text-[var(--text-muted)]">{result.error_message}</p>
+                      <p className="text-sm text-[var(--text-muted)]">{result.error_message || "Training failed. Please try again."}</p>
                     </div>
                   </CardContent>
                 </Card>

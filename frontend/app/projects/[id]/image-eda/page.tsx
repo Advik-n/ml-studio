@@ -38,7 +38,8 @@ export default function ImageEDAPage() {
       // Check for existing image jobs
       try {
         const jobsRes = await api.get(`/image/${id}/jobs`);
-        const edaJobs = jobsRes.data.filter((j: any) => j.job_type === "image_eda");
+        const jobsList = Array.isArray(jobsRes.data) ? jobsRes.data : [];
+        const edaJobs = jobsList.filter((j: any) => j.job_type === "image_eda");
         if (edaJobs.length > 0) {
           const latest = edaJobs[0];
           setJob(latest);

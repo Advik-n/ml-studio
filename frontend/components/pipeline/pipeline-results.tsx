@@ -82,7 +82,14 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
     await downloadBlob(`/pipeline/jobs/${job.id}/download-notebook`, `pipeline_${job.id}.ipynb`);
   };
 
-  const parsedMetrics = job.metrics ? JSON.parse(job.metrics) : null;
+  let parsedMetrics: Record<string, unknown> | null = null;
+  if (job.metrics) {
+    try {
+      parsedMetrics = typeof job.metrics === "string" ? JSON.parse(job.metrics) : job.metrics;
+    } catch {
+      parsedMetrics = null;
+    }
+  }
 
   // Separate complex metrics from simple numeric ones
   const complexKeys = new Set(["confusion_matrix", "cluster_sizes", "warnings"]);
@@ -91,8 +98,8 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
         ([k, v]) => v !== undefined && v !== null && !complexKeys.has(k)
       ) as [string, number][])
     : [];
-  const clusterSizes: Record<string, number> | null = parsedMetrics?.cluster_sizes ?? null;
-  const clusterWarnings: string[] = parsedMetrics?.warnings ?? [];
+  const clusterSizes: Record<string, number> | null = (parsedMetrics?.cluster_sizes as Record<string, number>) ?? null;
+  const clusterWarnings: string[] = (parsedMetrics?.warnings as string[]) ?? [];
 
   return (
     <div className="space-y-5">
