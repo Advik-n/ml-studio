@@ -34,7 +34,7 @@ interface ProjectCardProps {
 export default function ProjectCard({ project, onDelete }: ProjectCardProps) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
-  const config = typeConfig[project.project_type as keyof typeof typeConfig];
+  const config = typeConfig[project.project_type as keyof typeof typeConfig] ?? typeConfig.eda;
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();

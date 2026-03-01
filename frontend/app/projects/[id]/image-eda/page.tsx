@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentUser } from "@/lib/auth";
 import api from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { extractApiError } from "@/lib/api-errors";
 import type { Project, User } from "@/lib/types";
 
 export default function ImageEDAPage() {
@@ -43,7 +45,9 @@ export default function ImageEDAPage() {
             setEdaResult(latest.eda_report);
           }
         }
-      } catch {}
+      } catch (err) {
+        console.error("Failed to fetch image jobs:", err);
+      }
     } catch {
       router.push("/dashboard");
     } finally {
@@ -63,8 +67,8 @@ export default function ImageEDAPage() {
       formData.append("file", file);
       const res = await api.post(`/image/${id}/upload`, formData);
       setJob(res.data);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Upload failed");
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, "Upload failed"));
     } finally {
       setUploading(false);
     }
@@ -79,8 +83,8 @@ export default function ImageEDAPage() {
       if (res.data.eda_report) {
         setEdaResult(res.data.eda_report);
       }
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "EDA failed");
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, "EDA failed"));
     } finally {
       setRunning(false);
     }

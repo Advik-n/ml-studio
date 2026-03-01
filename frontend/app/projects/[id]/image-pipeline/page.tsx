@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentUser } from "@/lib/auth";
 import api from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { extractApiError } from "@/lib/api-errors";
 import type { Project, User } from "@/lib/types";
 
 const MODELS = [
@@ -68,7 +70,9 @@ export default function ImagePipelinePage() {
           if (pipJobs.length > 0) {
             setResult(pipJobs[0]);
           }
-        } catch {}
+        } catch (err) {
+          console.error("Failed to fetch image jobs:", err);
+        }
       }
     } catch {
       router.push("/dashboard");
@@ -91,8 +95,8 @@ export default function ImagePipelinePage() {
         normalize: true,
       });
       setResult(res.data);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Training failed");
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, "Training failed"));
     } finally {
       setTraining(false);
     }
@@ -213,7 +217,7 @@ export default function ImagePipelinePage() {
                 </Card>
               )}
 
-              {result && result.status === "completed" && (
+              {result && result.status === "completed" && result.metrics && (
                 <div className="space-y-4">
                   {/* Metrics Overview */}
                   <Card>

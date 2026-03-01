@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, DateTime, JSON, Text
+from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, Text
 from sqlalchemy.sql import func
 from database import Base
 
@@ -11,13 +11,13 @@ class ImageJob(Base):
     status = Column(String, default="pending")  # pending, processing, completed, failed
     
     # Image EDA fields
-    total_images = Column(Float, default=0)
-    num_classes = Column(Float, default=0)
+    total_images = Column(Integer, default=0)
+    num_classes = Column(Integer, default=0)
     class_distribution = Column(JSON, nullable=True)
     resolution_stats = Column(JSON, nullable=True)
     rgb_stats = Column(JSON, nullable=True)
     blur_scores = Column(JSON, nullable=True)
-    duplicate_count = Column(Float, default=0)
+    duplicate_count = Column(Integer, default=0)
     eda_report = Column(JSON, nullable=True)
     
     # Image Pipeline fields
