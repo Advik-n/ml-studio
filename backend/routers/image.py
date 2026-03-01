@@ -5,6 +5,7 @@ import zipfile
 import logging
 import asyncio
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from database import get_db
 from models.image_job import ImageJob
@@ -223,12 +224,14 @@ async def run_image_pipeline(
             "test_samples": result["test_samples"],
             "feature_dim": result["feature_dim"],
             "per_class_metrics": result["per_class_metrics"],
+            "feature_method": result.get("feature_method", "hog"),
         }
         pipeline_job.confusion_matrix = result["confusion_matrix"]
         pipeline_job.total_images = result["total_samples"]
         pipeline_job.num_classes = len(result["class_names"])
         pipeline_job.class_distribution = {name: 0 for name in result["class_names"]}
         pipeline_job.class_names = result["class_names"]
+        pipeline_job.training_history = {"report_code": result.get("report_code", "")}
         db.commit()
         db.refresh(pipeline_job)
         
@@ -272,6 +275,37 @@ async def list_image_jobs(
         ImageJob.project_id == project_id
     ).order_by(ImageJob.created_at.desc()).all()
     return jobs
+
+
+@router.get("/jobs/{job_id}/download-report")
+async def download_image_report(
+    job_id: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download the image pipeline report as a Python script."""
+    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
+    if job.status != "completed":
+        raise HTTPException(400, "Job not completed yet.")
+
+    report_code = ""
+    if job.training_history and isinstance(job.training_history, dict):
+        report_code = job.training_history.get("report_code", "")
+    if not report_code:
+        report_code = f"# Image Pipeline Report\n# Model: {job.model_name}\n# Accuracy: {job.accuracy}\n"
+
+    return Response(
+        content=report_code,
+        media_type="text/x-python",
+        headers={"Content-Disposition": f"attachment; filename=image_pipeline_{job_id[:8]}.py"},
+    )
 
 
 def _find_dataset_root(job_dir: str) -> str:

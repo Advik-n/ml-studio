@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { GitBranch, Loader2, XCircle, BarChart2, Target, Layers } from "lucide-react";
+import { GitBranch, Loader2, XCircle, BarChart2, Target, Layers, Download, Cpu } from "lucide-react";
 import Navbar from "@/components/layout/navbar";
 import Sidebar from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,19 @@ import type { Project, User } from "@/lib/types";
 
 const MODELS = [
   { id: "RandomForest", label: "Random Forest", desc: "Ensemble of decision trees" },
+  { id: "ExtraTrees", label: "Extra Trees", desc: "Extremely randomized trees" },
   { id: "SVM", label: "Support Vector Machine", desc: "Kernel-based classifier" },
   { id: "KNN", label: "K-Nearest Neighbors", desc: "Instance-based learning" },
   { id: "LogisticRegression", label: "Logistic Regression", desc: "Linear classifier" },
   { id: "GradientBoosting", label: "Gradient Boosting", desc: "Boosted tree ensemble" },
+  { id: "XGBoost", label: "XGBoost", desc: "Extreme gradient boosting" },
+  { id: "LightGBM", label: "LightGBM", desc: "Light gradient boosting" },
+];
+
+const FEATURE_METHODS = [
+  { id: "hog", label: "HOG + Color", desc: "Histogram of Oriented Gradients + color histograms" },
+  { id: "lbp", label: "LBP + Color", desc: "Local Binary Pattern + color histograms" },
+  { id: "combined", label: "Combined (HOG+LBP)", desc: "HOG + LBP + color histograms (best accuracy)" },
 ];
 
 const SIZES = [
@@ -41,6 +50,7 @@ export default function ImagePipelinePage() {
   const [selectedModel, setSelectedModel] = useState("RandomForest");
   const [targetSize, setTargetSize] = useState<number[]>([128, 128]);
   const [testSplit, setTestSplit] = useState(0.2);
+  const [featureMethod, setFeatureMethod] = useState("hog");
 
   // Results
   const [training, setTraining] = useState(false);
@@ -94,6 +104,7 @@ export default function ImagePipelinePage() {
         model_name: selectedModel,
         test_split: testSplit,
         normalize: true,
+        feature_method: featureMethod,
       }, { timeout: 900000 });
       setResult(res.data);
     } catch (err: unknown) {
@@ -190,6 +201,29 @@ export default function ImagePipelinePage() {
                           value={testSplit} onChange={e => setTestSplit(parseFloat(e.target.value))}
                           className="flex-1" />
                         <span className="text-sm font-mono text-[var(--text-muted)] w-12">{(testSplit * 100).toFixed(0)}%</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Feature Extraction */}
+                  <Card>
+                    <CardContent className="p-5">
+                      <h3 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
+                        <Cpu className="h-4 w-4 text-cyan-400" /> Feature Extraction
+                      </h3>
+                      <div className="space-y-2">
+                        {FEATURE_METHODS.map(m => (
+                          <button key={m.id}
+                            onClick={() => setFeatureMethod(m.id)}
+                            className={`w-full text-left rounded-lg border p-3 transition-all ${
+                              featureMethod === m.id
+                                ? "border-[var(--primary)] bg-[var(--primary)]/10"
+                                : "border-[var(--border)] hover:border-[var(--primary)]/30"
+                            }`}>
+                            <p className="text-sm font-medium text-[var(--text)]">{m.label}</p>
+                            <p className="text-xs text-[var(--text-muted)]">{m.desc}</p>
+                          </button>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -331,6 +365,8 @@ export default function ImagePipelinePage() {
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div className="text-[var(--text-muted)]">Model</div>
                         <div className="text-[var(--text)] font-medium">{result.model_name}</div>
+                        <div className="text-[var(--text-muted)]">Features</div>
+                        <div className="text-[var(--text)]">{result.metrics?.feature_method || "HOG + Color"}</div>
                         <div className="text-[var(--text-muted)]">Total Samples</div>
                         <div className="text-[var(--text)]">{result.metrics?.total_samples}</div>
                         <div className="text-[var(--text-muted)]">Train / Test</div>
@@ -340,6 +376,27 @@ export default function ImagePipelinePage() {
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Download Report */}
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={async () => {
+                      try {
+                        const res = await api.get(`/image/jobs/${result.id}/download-report`, { responseType: "blob" });
+                        const blob = new Blob([res.data], { type: "text/x-python" });
+                        const link = document.createElement("a");
+                        link.href = URL.createObjectURL(blob);
+                        link.download = `image_pipeline_${result.id?.slice(0, 8)}.py`;
+                        link.click();
+                        URL.revokeObjectURL(link.href);
+                      } catch {
+                        toast.error("Failed to download report");
+                      }
+                    }}
+                  >
+                    <Download className="h-4 w-4" /> Download Report
+                  </Button>
                 </div>
               )}
 

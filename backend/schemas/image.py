@@ -34,6 +34,9 @@ class ImagePipelineConfig(BaseModel):
     test_split: float = 0.2
     augment: bool = False
     normalize: bool = True
+    feature_method: str = "hog"  # hog, lbp, combined
+    use_pca: bool = False
+    pca_components: int = 100
     hyperparams: Optional[Dict[str, Any]] = None
 
     @field_validator('target_size')

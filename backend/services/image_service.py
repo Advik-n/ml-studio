@@ -206,93 +206,84 @@ def run_image_pipeline(
     dataset_path: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Train an image classification model using HOG features + sklearn."""
-    from skimage.feature import hog
-    from skimage.color import rgb2gray
+    """Train an image classification model using configurable feature extraction + sklearn."""
     from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import StandardScaler, LabelEncoder
+    from sklearn.decomposition import PCA
     from sklearn.metrics import (
         accuracy_score, precision_score, recall_score, f1_score,
         confusion_matrix, classification_report
     )
-    
+
     target_size = tuple(config.get("target_size", [128, 128]))
     model_name = config.get("model_name", "RandomForest")
     test_split = config.get("test_split", 0.2)
     normalize = config.get("normalize", True)
     hyperparams = config.get("hyperparams", {}) or {}
-    
+    feature_method = config.get("feature_method", "hog")
+    use_pca = config.get("use_pca", False)
+    pca_components = config.get("pca_components", 100)
+
     # Discover classes
     classes = _discover_classes(dataset_path)
     if not classes:
         raise ValueError("No class folders with images found")
-    
+
     class_names = sorted(classes.keys())
-    
+
     # Load and extract features
     features = []
     labels = []
-    
+
     for cls_name in class_names:
         for fpath in classes[cls_name]:
             img = _load_image(fpath, target_size)
             if img is None:
                 continue
-            
-            # Convert to grayscale and extract HOG features
-            gray = rgb2gray(img)
-            hog_features = hog(
-                gray,
-                orientations=9,
-                pixels_per_cell=(8, 8),
-                cells_per_block=(2, 2),
-                feature_vector=True,
-            )
-            
-            # Also add color histogram features
-            color_features = []
-            for ch in range(3):
-                hist, _ = np.histogram(img[:,:,ch], bins=32, range=(0, 256))
-                color_features.extend(hist / max(hist.sum(), 1))
-            
-            combined = np.concatenate([hog_features, color_features])
-            features.append(combined)
+            feat = _extract_features(img, method=feature_method)
+            features.append(feat)
             labels.append(cls_name)
-    
+
     if len(features) < 10:
         raise ValueError(f"Too few valid images loaded ({len(features)}). Need at least 10.")
-    
+
     X = np.array(features)
     le = LabelEncoder()
     y = le.fit_transform(labels)
-    
+
     # Split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_split, random_state=42, stratify=y
     )
-    
+
     # Normalize
     if normalize:
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
         X_test = scaler.transform(X_test)
-    
+
+    # Optional PCA
+    if use_pca and pca_components < X_train.shape[1]:
+        pca = PCA(n_components=min(pca_components, X_train.shape[1], X_train.shape[0]))
+        X_train = pca.fit_transform(X_train)
+        X_test = pca.transform(X_test)
+
     # Select model
     model = _get_image_model(model_name, hyperparams)
-    
+
     # Train
     model.fit(X_train, y_train)
-    
+
     # Evaluate
     y_pred = model.predict(X_test)
-    
+
     acc = float(accuracy_score(y_test, y_pred))
     prec = float(precision_score(y_test, y_pred, average='weighted', zero_division=0))
     rec = float(recall_score(y_test, y_pred, average='weighted', zero_division=0))
     f1 = float(f1_score(y_test, y_pred, average='weighted', zero_division=0))
     cm = confusion_matrix(y_test, y_pred).tolist()
     report = classification_report(y_test, y_pred, target_names=class_names, output_dict=True, zero_division=0)
-    
+
     # Per-class metrics
     per_class = {}
     for cls_name in class_names:
@@ -303,8 +294,8 @@ def run_image_pipeline(
                 "f1": round(report[cls_name]["f1-score"], 4),
                 "support": int(report[cls_name]["support"]),
             }
-    
-    return {
+
+    result = {
         "accuracy": round(acc, 4),
         "precision": round(prec, 4),
         "recall": round(rec, 4),
@@ -315,18 +306,71 @@ def run_image_pipeline(
         "total_samples": len(features),
         "train_samples": len(X_train),
         "test_samples": len(X_test),
-        "feature_dim": X.shape[1],
+        "feature_dim": X_train.shape[1],
         "model_name": model_name,
+        "feature_method": feature_method,
     }
+
+    # Generate report code
+    result["report_code"] = generate_image_report(result, config)
+
+    return result
+
+
+def _extract_lbp_features(gray: np.ndarray, radius: int = 3, n_points: int = 24) -> np.ndarray:
+    """Extract Local Binary Pattern histogram features."""
+    from skimage.feature import local_binary_pattern
+    lbp = local_binary_pattern(gray, n_points, radius, method='uniform')
+    n_bins = n_points + 2
+    hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins), density=True)
+    return hist
+
+
+def _extract_features(img: np.ndarray, method: str = "hog") -> np.ndarray:
+    """Extract features from image using the specified method."""
+    from skimage.feature import hog
+    from skimage.color import rgb2gray
+
+    gray = rgb2gray(img)
+
+    if method == "lbp":
+        lbp_feat = _extract_lbp_features((gray * 255).astype(np.uint8))
+        color_features = []
+        for ch in range(3):
+            hist, _ = np.histogram(img[:, :, ch], bins=32, range=(0, 256))
+            color_features.extend(hist / max(hist.sum(), 1))
+        return np.concatenate([lbp_feat, color_features])
+
+    elif method == "combined":
+        # HOG + LBP + Color histogram
+        hog_features = hog(gray, orientations=9, pixels_per_cell=(8, 8),
+                           cells_per_block=(2, 2), feature_vector=True)
+        lbp_feat = _extract_lbp_features((gray * 255).astype(np.uint8))
+        color_features = []
+        for ch in range(3):
+            hist, _ = np.histogram(img[:, :, ch], bins=32, range=(0, 256))
+            color_features.extend(hist / max(hist.sum(), 1))
+        return np.concatenate([hog_features, lbp_feat, color_features])
+
+    else:  # default: hog
+        hog_features = hog(gray, orientations=9, pixels_per_cell=(8, 8),
+                           cells_per_block=(2, 2), feature_vector=True)
+        color_features = []
+        for ch in range(3):
+            hist, _ = np.histogram(img[:, :, ch], bins=32, range=(0, 256))
+            color_features.extend(hist / max(hist.sum(), 1))
+        return np.concatenate([hog_features, color_features])
 
 
 def _get_image_model(model_name: str, hyperparams: Dict[str, Any]):
-    """Return an sklearn classifier for image classification."""
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    """Return a classifier for image classification."""
+    from sklearn.ensemble import (
+        RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
+    )
     from sklearn.svm import SVC
     from sklearn.neighbors import KNeighborsClassifier
     from sklearn.linear_model import LogisticRegression
-    
+
     # Convert string hyperparams to proper types
     clean_params = {}
     for k, v in hyperparams.items():
@@ -340,30 +384,119 @@ def _get_image_model(model_name: str, hyperparams: Dict[str, Any]):
                     clean_params[k] = v
         else:
             clean_params[k] = v
-    
+
     models = {
-        "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
-        "SVM": SVC(kernel="rbf", random_state=42),
-        "KNN": KNeighborsClassifier(n_neighbors=5),
-        "LogisticRegression": LogisticRegression(max_iter=1000, random_state=42),
-        "GradientBoosting": GradientBoostingClassifier(n_estimators=100, random_state=42),
+        "RandomForest": lambda: RandomForestClassifier(n_estimators=100, random_state=42),
+        "SVM": lambda: SVC(kernel="rbf", probability=True, random_state=42),
+        "KNN": lambda: KNeighborsClassifier(n_neighbors=5),
+        "LogisticRegression": lambda: LogisticRegression(max_iter=1000, random_state=42),
+        "GradientBoosting": lambda: GradientBoostingClassifier(n_estimators=100, random_state=42),
+        "ExtraTrees": lambda: ExtraTreesClassifier(n_estimators=100, random_state=42),
     }
-    
+
+    # Optional: XGBoost
+    try:
+        from xgboost import XGBClassifier
+        models["XGBoost"] = lambda: XGBClassifier(
+            n_estimators=100, max_depth=6, learning_rate=0.1,
+            use_label_encoder=False, eval_metric='mlogloss', random_state=42, verbosity=0
+        )
+    except ImportError:
+        pass
+
+    # Optional: LightGBM
+    try:
+        from lightgbm import LGBMClassifier
+        models["LightGBM"] = lambda: LGBMClassifier(
+            n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42, verbose=-1
+        )
+    except ImportError:
+        pass
+
     name_lower = model_name.lower().replace("_", "").replace(" ", "")
     selected = None
-    for key, val in models.items():
+    for key, factory in models.items():
         if key.lower().replace("_", "") == name_lower:
-            selected = val
+            selected = factory()
             break
-    
+
     if selected is None:
-        selected = models["RandomForest"]
+        selected = models["RandomForest"]()
         logger.warning(f"Unknown model '{model_name}', falling back to RandomForest")
-    
+
     if clean_params:
         try:
             selected.set_params(**clean_params)
         except Exception as e:
             logger.warning(f"Failed to set hyperparams: {e}")
-    
+
     return selected
+
+
+def generate_image_report(result: Dict[str, Any], config: Dict[str, Any]) -> str:
+    """Generate a Python report script for the image pipeline run."""
+    class_names = result.get("class_names", [])
+    cm = result.get("confusion_matrix", [])
+    per_class = result.get("per_class_metrics", {})
+
+    code = f'''"""
+Image Classification Pipeline Report
+=====================================
+Model: {result.get("model_name", "N/A")}
+Feature Extraction: {config.get("feature_method", "hog")}
+Image Size: {config.get("target_size", [128, 128])}
+Test Split: {config.get("test_split", 0.2)}
+"""
+
+import numpy as np
+
+# ── Results ──────────────────────────────────────────────────────────────────
+accuracy   = {result.get("accuracy", 0):.4f}
+precision  = {result.get("precision", 0):.4f}
+recall     = {result.get("recall", 0):.4f}
+f1_score   = {result.get("f1_score", 0):.4f}
+
+print(f"Accuracy:  {{accuracy:.4f}}")
+print(f"Precision: {{precision:.4f}}")
+print(f"Recall:    {{recall:.4f}}")
+print(f"F1 Score:  {{f1_score:.4f}}")
+
+# ── Dataset Info ─────────────────────────────────────────────────────────────
+total_samples  = {result.get("total_samples", 0)}
+train_samples  = {result.get("train_samples", 0)}
+test_samples   = {result.get("test_samples", 0)}
+feature_dim    = {result.get("feature_dim", 0)}
+class_names    = {class_names}
+
+print(f"\\nTotal samples: {{total_samples}}")
+print(f"Train/Test: {{train_samples}}/{{test_samples}}")
+print(f"Feature dimension: {{feature_dim}}")
+print(f"Classes: {{class_names}}")
+
+# ── Per-Class Metrics ────────────────────────────────────────────────────────
+print("\\nPer-Class Metrics:")
+print(f"  {{'Class':<20}} {{'Precision':>10}} {{'Recall':>10}} {{'F1':>10}} {{'Support':>10}}")
+print("  " + "-" * 60)
+'''
+    for cls_name, m in per_class.items():
+        code += f'print(f"  {{{repr(cls_name)}:<20}} {m.get("precision", 0):>10.4f} {m.get("recall", 0):>10.4f} {m.get("f1", 0):>10.4f} {m.get("support", 0):>10}")\n'
+
+    code += f'''
+# ── Confusion Matrix ────────────────────────────────────────────────────────
+confusion_matrix = np.array({cm})
+print("\\nConfusion Matrix:")
+print(confusion_matrix)
+
+# ── Reproduce This Pipeline ─────────────────────────────────────────────────
+"""
+To reproduce this pipeline:
+
+1. Load images from class folders
+2. Resize to {config.get("target_size", [128, 128])}
+3. Extract {config.get("feature_method", "HOG + color histogram")} features
+4. StandardScaler normalization
+5. Train {result.get("model_name", "RandomForest")} classifier
+6. Evaluate on {config.get("test_split", 0.2):.0%} held-out test set
+"""
+'''
+    return code
