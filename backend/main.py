@@ -29,11 +29,30 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Create database tables and ensure uploads directory exists on startup."""
     Base.metadata.create_all(bind=engine)
+    _run_migrations(engine)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info("Database tables created (or already exist).")
     logger.info("Upload directory: %s", os.path.abspath(settings.UPLOAD_DIR))
     yield  # app runs here
     # shutdown logic (if any) goes after yield
+
+
+def _run_migrations(eng):
+    """Add missing columns to existing tables (lightweight auto-migration)."""
+    from sqlalchemy import text, inspect as sa_inspect
+    insp = sa_inspect(eng)
+
+    # image_jobs migrations
+    if "image_jobs" in insp.get_table_names():
+        existing = {c["name"] for c in insp.get_columns("image_jobs")}
+        migrations = [
+            ("class_names", "JSON"),
+        ]
+        with eng.begin() as conn:
+            for col_name, col_type in migrations:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE image_jobs ADD COLUMN {col_name} {col_type}"))
+                    logger.info("Added column image_jobs.%s", col_name)
 
 
 app = FastAPI(
