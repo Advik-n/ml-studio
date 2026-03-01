@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.image_job import ImageJob
 from schemas.image import ImageJobResponse, ImagePipelineConfig
+from models.project import Project
 from services import image_service
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ async def upload_image_dataset(
     db: Session = Depends(get_db),
 ):
     """Upload a ZIP file containing image dataset with class folders."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, f"Project not found: {project_id}")
+
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Only ZIP files are accepted. Got: {ext}")
@@ -83,6 +88,10 @@ async def register_local_folder(
     db: Session = Depends(get_db),
 ):
     """Register a local folder as image dataset (for testing)."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, f"Project not found: {project_id}")
+
     if not os.path.isdir(folder_path):
         raise HTTPException(400, f"Folder not found: {folder_path}")
     
