@@ -21,6 +21,7 @@ export default function ImageEDAPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [running, setRunning] = useState(false);
   const [job, setJob] = useState<any>(null);
   const [edaResult, setEdaResult] = useState<any>(null);
@@ -61,16 +62,32 @@ export default function ImageEDAPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const MAX_SIZE = 500 * 1024 * 1024; // 500MB
+    if (file.size > MAX_SIZE) {
+      toast.error("File too large. Maximum 500MB.");
+      return;
+    }
+
     setUploading(true);
+    setUploadProgress(0);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await api.post(`/image/${id}/upload`, formData);
+      const res = await api.post(`/image/${id}/upload`, formData, {
+        timeout: 300000, // 5 minutes for large uploads
+        onUploadProgress: (e) => {
+          if (e.total) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        },
+      });
       setJob(res.data);
+      toast.success("Dataset uploaded successfully!");
     } catch (err: unknown) {
       toast.error(extractApiError(err, "Upload failed"));
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -78,7 +95,7 @@ export default function ImageEDAPage() {
     if (!job) return;
     setRunning(true);
     try {
-      const res = await api.post(`/image/jobs/${job.id}/run-eda`);
+      const res = await api.post(`/image/jobs/${job.id}/run-eda`, {}, { timeout: 600000 });
       setJob(res.data);
       if (res.data.eda_report) {
         setEdaResult(res.data.eda_report);
@@ -121,12 +138,23 @@ export default function ImageEDAPage() {
                   <p className="text-sm text-[var(--text-muted)] mb-4 text-center max-w-md">
                     Upload a ZIP file containing class folders with images (e.g., train/cat/*.jpg, train/dog/*.jpg)
                   </p>
-                  <label className="cursor-pointer">
-                    <input type="file" accept=".zip" onChange={handleUpload} className="hidden" />
-                    <Button isLoading={uploading}>
-                      <Upload className="h-4 w-4" /> {uploading ? "Uploading..." : "Select ZIP File"}
-                    </Button>
-                  </label>
+                  {!uploading ? (
+                    <label className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity">
+                      <input type="file" accept=".zip" onChange={handleUpload} className="hidden" />
+                      <Upload className="h-4 w-4" /> Select ZIP File
+                    </label>
+                  ) : (
+                    <div className="w-full max-w-xs">
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-[var(--text)]">Uploading...</span>
+                        <span className="text-[var(--text-muted)]">{uploadProgress}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                        <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -149,6 +177,12 @@ export default function ImageEDAPage() {
                   <Button onClick={handleRunEDA} isLoading={running}>
                     <BarChart2 className="h-4 w-4" /> Run Image EDA
                   </Button>
+                )}
+                {running && (
+                  <div className="flex items-center gap-3 mt-4">
+                    <div className="h-5 w-5 rounded-full border-2 border-[var(--primary)] border-t-transparent animate-spin" />
+                    <span className="text-sm text-[var(--text-muted)]">Running EDA analysis... This may take a minute.</span>
+                  </div>
                 )}
                 {job.status === "failed" && (
                   <p className="text-sm text-red-500">{job.error_message}</p>

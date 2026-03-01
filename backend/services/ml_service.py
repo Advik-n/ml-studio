@@ -298,6 +298,7 @@ async def build_and_run_pipeline(
     # Train / evaluate
     metrics: Dict[str, Any] = {}
     accuracy: Optional[float] = None
+    _cv_metrics: Dict[str, float] = {}   # initialise early; populated by supervised branch
 
     if model_type == "clustering" or y is None:
         X_transformed = pipeline[:-1].fit_transform(X)

@@ -19,6 +19,7 @@ class ImageJobResponse(BaseModel):
     accuracy: Optional[float] = None
     metrics: Optional[Dict[str, Any]] = None
     confusion_matrix: Optional[List[List[int]]] = None
+    class_names: Optional[List[str]] = None
     training_history: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None

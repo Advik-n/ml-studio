@@ -93,7 +93,7 @@ export default function ImagePipelinePage() {
         model_name: selectedModel,
         test_split: testSplit,
         normalize: true,
-      });
+      }, { timeout: 900000 });
       setResult(res.data);
     } catch (err: unknown) {
       toast.error(extractApiError(err, "Training failed"));

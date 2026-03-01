@@ -3,6 +3,7 @@ import uuid
 import shutil
 import zipfile
 import logging
+import asyncio
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from database import get_db
@@ -48,12 +49,19 @@ async def upload_image_dataset(
     # Save and extract ZIP
     zip_path = os.path.join(job_dir, "dataset.zip")
     try:
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(413, "File too large. Maximum 500MB.")
-        
+        total_size = 0
+        CHUNK_SIZE = 1024 * 1024  # 1MB chunks
         with open(zip_path, "wb") as f:
-            f.write(content)
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_SIZE:
+                    f.close()
+                    os.remove(zip_path)
+                    raise HTTPException(413, f"File too large. Maximum {MAX_UPLOAD_SIZE // (1024*1024)}MB.")
+                f.write(chunk)
         
         with zipfile.ZipFile(zip_path, 'r') as zf:
             # Security: check for path traversal
@@ -148,7 +156,7 @@ async def run_image_eda(
         job.status = "processing"
         db.commit()
         
-        result = image_service.run_image_eda(dataset_path)
+        result = await asyncio.to_thread(image_service.run_image_eda, dataset_path)
         
         job.status = "completed"
         job.total_images = result["total_images"]
@@ -201,7 +209,7 @@ async def run_image_pipeline(
         db.add(pipeline_job)
         db.commit()
         
-        result = image_service.run_image_pipeline(dataset_path, config.model_dump())
+        result = await asyncio.to_thread(image_service.run_image_pipeline, dataset_path, config.model_dump())
         
         pipeline_job.status = "completed"
         pipeline_job.model_name = result["model_name"]
@@ -220,6 +228,7 @@ async def run_image_pipeline(
         pipeline_job.total_images = result["total_samples"]
         pipeline_job.num_classes = len(result["class_names"])
         pipeline_job.class_distribution = {name: 0 for name in result["class_names"]}
+        pipeline_job.class_names = result["class_names"]
         db.commit()
         db.refresh(pipeline_job)
         

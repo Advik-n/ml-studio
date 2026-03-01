@@ -25,6 +25,7 @@ class ImageJob(Base):
     accuracy = Column(Float, nullable=True)
     metrics = Column(JSON, nullable=True)
     confusion_matrix = Column(JSON, nullable=True)
+    class_names = Column(JSON, nullable=True)  # List of class names
     training_history = Column(JSON, nullable=True)
     
     error_message = Column(Text, nullable=True)
