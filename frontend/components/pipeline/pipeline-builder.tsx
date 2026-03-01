@@ -201,13 +201,16 @@ export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: P
     (async () => {
       try {
         const res = await api.get(`/eda/jobs/${edaJobId}/data-summary`);
-        const details = res.data?.column_details as { name: string }[];
-        if (details?.length) {
-          const cols = details.map((d: { name: string }) => d.name);
-          setColumns(cols);
-          setFeatureColumns(cols.slice(0, -1));
-          setTargetColumns(cols.length > 0 ? [cols[cols.length - 1]] : []);
-          setDatasetFilename("cleaned_data.csv");
+        const rawDetails = res.data?.column_details;
+        const details = Array.isArray(rawDetails) ? rawDetails : [];
+        if (details.length > 0) {
+          const cols = details.map((d: { name: string }) => d.name).filter(Boolean);
+          if (cols.length > 0) {
+            setColumns(cols);
+            setFeatureColumns(cols.length > 1 ? cols.slice(0, -1) : cols);
+            setTargetColumns([cols[cols.length - 1]]);
+            setDatasetFilename("cleaned_data.csv");
+          }
         }
       } catch {
         // Will rely on manual upload
@@ -342,6 +345,7 @@ export default function PipelineBuilder({ projectId, onJobCreated, edaJobId }: P
         });
       }
       const jobResponse = await api.post<PipelineJob>(`/pipeline/${projectId}/configure`, config);
+      if (!jobResponse.data) { toast.error("No response from server"); return; }
       toast.success("Pipeline started!");
       onJobCreated(jobResponse.data);
     } catch (err: unknown) {

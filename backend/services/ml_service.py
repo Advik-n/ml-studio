@@ -52,7 +52,7 @@ from sklearn.metrics import (
     roc_auc_score,
     silhouette_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
@@ -198,6 +198,13 @@ async def build_and_run_pipeline(
         target_cols = [df.columns[-1]]
         target_col = target_cols[0]
 
+    # Final safety check: target must not be in features
+    if target_cols and hasattr(X, 'columns'):
+        leaked = set(target_cols) & set(X.columns)
+        if leaked:
+            X = X.drop(columns=list(leaked))
+            logger.warning("Removed leaked target columns from features: %s", leaked)
+
     if target_cols:
         y = df[target_cols] if multi_target else df[target_col]
     else:
@@ -261,27 +268,23 @@ async def build_and_run_pipeline(
     else:
         pipeline, label_encoder = _build_preprocessing_pipeline(X, transformer_names, model_type)
 
-    # Encode target for classification / nlp if needed
+    # Encode target for classification / nlp if needed (deferred to after split)
     le: Any = None
+    _TREE_BASED_MODELS = {
+        "RandomForest", "GradientBoosting", "DecisionTree", "XGBoost",
+        "TfidfRandomForest",
+    }
+    _needs_encoding = (
+        y is not None
+        and model_type in ("classification", "nlp")
+        and model_name not in _TREE_BASED_MODELS
+    )
     if y is not None and model_type in ("classification", "nlp"):
-        # Safety guard: ensure no NaN remains before LabelEncoder
+        # Safety guard: ensure no NaN remains before encoding / training
         if hasattr(y, 'isna') and (y.isna().any() if not isinstance(y, pd.DataFrame) else y.isna().any().any()):
             valid = y.notna() if not isinstance(y, pd.DataFrame) else y.notna().all(axis=1)
             X = X.loc[valid].reset_index(drop=True)
             y = y.loc[valid].reset_index(drop=True)
-        if multi_target and isinstance(y, pd.DataFrame):
-            encoders: Dict[str, LabelEncoder] = {}
-            for col in target_cols:
-                series = y[col]
-                if series.dtype == object or str(series.dtype) == "category":
-                    enc = LabelEncoder()
-                    y[col] = enc.fit_transform(series)
-                    encoders[col] = enc
-            le = encoders or None
-        elif hasattr(y, "dtype") and (y.dtype == object or str(y.dtype) == "category"):
-            enc = LabelEncoder()
-            y = pd.Series(enc.fit_transform(y), name=target_col)
-            le = enc
 
     # Attach the estimator
     estimator = _get_estimator(model_type, model_name, hyperparams)
@@ -395,6 +398,23 @@ async def build_and_run_pipeline(
             X, y, test_size=test_size, random_state=42, stratify=stratify_target
         )
 
+        # Deferred label encoding: fit on y_train only to avoid data leakage
+        if _needs_encoding:
+            if multi_target and isinstance(y_train, pd.DataFrame):
+                encoders: Dict[str, LabelEncoder] = {}
+                for col in target_cols:
+                    if y_train[col].dtype == object or str(y_train[col].dtype) == "category":
+                        enc = LabelEncoder()
+                        y_train[col] = enc.fit_transform(y_train[col])
+                        y_test[col] = enc.transform(y_test[col])
+                        encoders[col] = enc
+                le = encoders or None
+            elif hasattr(y_train, "dtype") and (y_train.dtype == object or str(y_train.dtype) == "category"):
+                enc = LabelEncoder()
+                y_train = pd.Series(enc.fit_transform(y_train), name=target_col, index=y_train.index)
+                y_test = pd.Series(enc.transform(y_test), name=target_col, index=y_test.index)
+                le = enc
+
         # Class imbalance detection and auto-balancing for classification/nlp
         if model_type in ("classification", "nlp") and not multi_target:
             class_counts = pd.Series(y_train).value_counts()
@@ -413,6 +433,16 @@ async def build_and_run_pipeline(
 
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
+
+        # Cross-validation on training set
+        _cv_metrics: Dict[str, float] = {}
+        try:
+            cv_scoring = "accuracy" if model_type in ("classification", "nlp") else "r2"
+            cv_scores = cross_val_score(pipeline, X_train, y_train, cv=5, scoring=cv_scoring)
+            _cv_metrics["cv_mean"] = round(float(cv_scores.mean()), 4)
+            _cv_metrics["cv_std"] = round(float(cv_scores.std()), 4)
+        except Exception:
+            logger.debug("Cross-validation skipped (insufficient data or incompatible model).")
 
         # Guard: drop any NaN/inf in predictions
         if model_type == "regression" and hasattr(y_pred, '__len__'):
@@ -496,6 +526,10 @@ async def build_and_run_pipeline(
                     "mse": round(float(mean_squared_error(y_test, y_pred)), 4),
                     "mae": round(float(mean_absolute_error(y_test, y_pred)), 4),
                 }
+
+    # Merge cross-validation metrics (computed before metrics dict was reassigned)
+    if _cv_metrics:
+        metrics.update(_cv_metrics)
 
     # Save model + label encoder
     model_path = os.path.join(output_folder, "model.joblib")

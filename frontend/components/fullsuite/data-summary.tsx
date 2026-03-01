@@ -266,6 +266,7 @@ export default function DataSummary({ jobId, onProceedToPipeline }: DataSummaryP
     try {
       setDownloading(true);
       const res = await api.get(`/eda/jobs/${jobId}/pipeline-report`, { responseType: "blob" });
+      if (!res.data) { toast.error("Empty response"); return; }
       const blob = new Blob([res.data]);
       const link = document.createElement("a");
       link.href = window.URL.createObjectURL(blob);

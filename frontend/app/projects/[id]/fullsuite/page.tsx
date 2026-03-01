@@ -58,13 +58,15 @@ export default function FullSuitePage() {
       // Check for existing EDA jobs to resume workflow
       try {
         const edaRes = await api.get<EDAJob[]>(`/eda/${id}/jobs`);
-        const latestEda = edaRes.data[0];
+        const edaList = Array.isArray(edaRes.data) ? edaRes.data : [];
+        const latestEda = edaList[0];
         if (latestEda?.status === "completed") {
           setEdaJob(latestEda);
           // Check for pipeline jobs too
           try {
             const pipRes = await api.get<PipelineJob[]>(`/pipeline/${id}/jobs`);
-            const latestPip = pipRes.data[0];
+            const pipList = Array.isArray(pipRes.data) ? pipRes.data : [];
+            const latestPip = pipList[0];
             if (latestPip) {
               setPipelineJob(latestPip);
               setPhase("pipeline");
@@ -128,7 +130,7 @@ export default function FullSuitePage() {
         <Sidebar
           projectId={id}
           projectName={project.name}
-          projectType={project.project_type as "eda" | "pipeline" | "mixed"}
+          projectType={project.project_type as "eda" | "pipeline" | "mixed" | "image"}
         />
         <main className="flex-1 p-6 max-w-6xl">
           {/* Header */}
