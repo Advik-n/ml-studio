@@ -68,7 +68,7 @@ export default function PredictionGUI({ job }: PredictionGUIProps) {
   };
 
   const maxProb = result?.probabilities
-    ? Math.max(...Object.values(result.probabilities))
+    ? Math.max(...Object.values(result.probabilities ?? {}))
     : null;
 
   return (

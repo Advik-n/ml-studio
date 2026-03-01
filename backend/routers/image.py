@@ -7,9 +7,11 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from models.image_job import ImageJob
+from models.user import User
 from schemas.image import ImageJobResponse, ImagePipelineConfig
 from models.project import Project
 from services import image_service
+from utils.dependencies import require_verified_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/image", tags=["image"])
@@ -25,10 +27,13 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
 async def upload_image_dataset(
     project_id: str,
     file: UploadFile = File(...),
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """Upload a ZIP file containing image dataset with class folders."""
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.user_id == current_user.id
+    ).first()
     if not project:
         raise HTTPException(404, f"Project not found: {project_id}")
 
@@ -85,10 +90,13 @@ async def upload_image_dataset(
 async def register_local_folder(
     project_id: str,
     folder_path: str,
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """Register a local folder as image dataset (for testing)."""
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.user_id == current_user.id
+    ).first()
     if not project:
         raise HTTPException(404, f"Project not found: {project_id}")
 
@@ -121,12 +129,18 @@ async def register_local_folder(
 @router.post("/jobs/{job_id}/run-eda", response_model=ImageJobResponse)
 async def run_image_eda(
     job_id: str,
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """Run image EDA analysis on uploaded dataset."""
     job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
     
     dataset_path = _get_dataset_path(job_id)
     
@@ -160,12 +174,18 @@ async def run_image_eda(
 async def run_image_pipeline(
     job_id: str,
     config: ImagePipelineConfig,
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """Train image classification model."""
     job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
     
     dataset_path = _get_dataset_path(job_id)
     
@@ -212,21 +232,33 @@ async def run_image_pipeline(
 @router.get("/jobs/{job_id}", response_model=ImageJobResponse)
 async def get_image_job(
     job_id: str,
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """Get image job status and results."""
     job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
     return job
 
 
 @router.get("/{project_id}/jobs", response_model=list[ImageJobResponse])
 async def list_image_jobs(
     project_id: str,
+    current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
     """List all image jobs for a project."""
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(404, "Project not found.")
     jobs = db.query(ImageJob).filter(
         ImageJob.project_id == project_id
     ).order_by(ImageJob.created_at.desc()).all()
@@ -234,29 +266,12 @@ async def list_image_jobs(
 
 
 def _find_dataset_root(job_dir: str) -> str:
-    """Find the root directory containing class folders."""
-    # Check if job_dir directly has class folders
-    entries = [e for e in os.listdir(job_dir) if os.path.isdir(os.path.join(job_dir, e))]
-    
-    # Check for a symlinked dataset folder
+    """Find the root directory for the dataset. Returns job_dir itself
+    since _discover_classes handles traversal."""
+    # Check for symlinked dataset folder (from upload-folder endpoint)
     dataset_link = os.path.join(job_dir, "dataset")
     if os.path.isdir(dataset_link):
         return dataset_link
-    
-    # Check if entries have image files (indicating class folders)
-    for entry in entries:
-        entry_path = os.path.join(job_dir, entry)
-        files = os.listdir(entry_path)
-        if any(f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) for f in files):
-            return job_dir
-        # Check one level deeper
-        sub_entries = [e for e in os.listdir(entry_path) if os.path.isdir(os.path.join(entry_path, e))]
-        for sub in sub_entries:
-            sub_path = os.path.join(entry_path, sub)
-            sub_files = os.listdir(sub_path)
-            if any(f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) for f in sub_files):
-                return entry_path
-    
     return job_dir
 
 

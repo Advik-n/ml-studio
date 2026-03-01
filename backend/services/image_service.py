@@ -20,18 +20,65 @@ def _load_image(path: str, target_size: Tuple[int, int] = (128, 128)):
         return None
 
 def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
-    """Discover class folders and their image files."""
-    classes = {}
-    for entry in sorted(os.listdir(dataset_path)):
-        class_dir = os.path.join(dataset_path, entry)
-        if os.path.isdir(class_dir):
-            images = [
-                os.path.join(class_dir, f) for f in os.listdir(class_dir)
-                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'))
-            ]
-            if images:
-                classes[entry] = images
-    return classes
+    """Discover class folders and their image files.
+    Handles: flat (root/class/imgs), split (root/train/class/imgs),
+    and nested (root/wrapper/class/imgs) structures.
+    """
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.gif'}
+
+    def _is_image(f):
+        return os.path.splitext(f)[1].lower() in IMAGE_EXTS
+
+    def _scan_flat(root):
+        """Check if root directly contains class folders with images."""
+        classes = {}
+        for entry in sorted(os.listdir(root)):
+            class_dir = os.path.join(root, entry)
+            if os.path.isdir(class_dir):
+                images = [os.path.join(class_dir, f) for f in os.listdir(class_dir) if _is_image(f)]
+                if images:
+                    classes[entry] = images
+        return classes
+
+    # 1. Try direct class folders
+    classes = _scan_flat(dataset_path)
+    if classes:
+        return classes
+
+    # 2. Check for train/test/val split structure or single wrapper folder
+    subdirs = [d for d in sorted(os.listdir(dataset_path)) if os.path.isdir(os.path.join(dataset_path, d))]
+
+    SPLIT_NAMES = {'train', 'test', 'val', 'validation', 'dev', 'training', 'testing'}
+    split_dirs = [d for d in subdirs if d.lower() in SPLIT_NAMES]
+
+    if split_dirs:
+        merged = {}
+        for split in split_dirs:
+            split_classes = _scan_flat(os.path.join(dataset_path, split))
+            for cls, files in split_classes.items():
+                merged.setdefault(cls, []).extend(files)
+        if merged:
+            return merged
+
+    # 3. Check one level deeper (wrapper folder like "dataset_name/")
+    for subdir in subdirs:
+        sub_path = os.path.join(dataset_path, subdir)
+        sub_classes = _scan_flat(sub_path)
+        if sub_classes:
+            return sub_classes
+        # Check if this subdir has train/test splits
+        sub_subdirs = [d for d in os.listdir(sub_path) if os.path.isdir(os.path.join(sub_path, d))]
+        sub_splits = [d for d in sub_subdirs if d.lower() in SPLIT_NAMES]
+        if sub_splits:
+            merged = {}
+            for split in sub_splits:
+                split_classes = _scan_flat(os.path.join(sub_path, split))
+                for cls, files in split_classes.items():
+                    merged.setdefault(cls, []).extend(files)
+            if merged:
+                return merged
+
+    return {}
 
 def _compute_dhash(img_array: np.ndarray, hash_size: int = 8) -> str:
     """Compute difference hash for duplicate detection."""
