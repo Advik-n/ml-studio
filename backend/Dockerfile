@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p uploads
+# Create local fallback dirs (persistent storage is at /data on HF Spaces)
+RUN mkdir -p uploads /data/db /data/uploads
 
 EXPOSE 7860
 

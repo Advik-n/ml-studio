@@ -25,6 +25,8 @@ export default function ImageEDAPage() {
   const [running, setRunning] = useState(false);
   const [job, setJob] = useState<any>(null);
   const [edaResult, setEdaResult] = useState<any>(null);
+  const [fileType, setFileType] = useState("image");
+  const [maxSample, setMaxSample] = useState(500);
 
   const fetchData = useCallback(async () => {
     try {
@@ -86,7 +88,7 @@ export default function ImageEDAPage() {
     if (!job) return;
     setRunning(true);
     try {
-      const res = await api.post(`/image/jobs/${job.id}/run-eda`, {}, { timeout: 600000 });
+      const res = await api.post(`/image/jobs/${job.id}/run-eda`, { file_type: fileType, max_sample: maxSample }, { timeout: 600000 });
       setJob(res.data);
       if (res.data.eda_report) setEdaResult(res.data.eda_report);
     } catch (err: unknown) {
@@ -189,9 +191,40 @@ export default function ImageEDAPage() {
                   </Badge>
                 </div>
                 {job.status === "pending" && (
-                  <Button onClick={handleRunEDA} isLoading={running} className="btn-glow">
-                    <BarChart2 className="h-4 w-4" /> Run Image EDA
-                  </Button>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-4">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">File Type</label>
+                        <select
+                          value={fileType}
+                          onChange={(e) => setFileType(e.target.value)}
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] min-w-[140px]"
+                        >
+                          <option value="image">Image</option>
+                          <option value="csv">CSV</option>
+                          <option value="txt">Text</option>
+                          <option value="json">JSON</option>
+                          <option value="tsv">TSV</option>
+                          <option value="parquet">Parquet</option>
+                          <option value="jsonl">JSONL</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Max Samples</label>
+                        <input
+                          type="number"
+                          value={maxSample}
+                          onChange={(e) => setMaxSample(Math.max(10, parseInt(e.target.value) || 500))}
+                          min={10}
+                          max={5000}
+                          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] w-[120px]"
+                        />
+                      </div>
+                    </div>
+                    <Button onClick={handleRunEDA} isLoading={running} className="btn-glow">
+                      <BarChart2 className="h-4 w-4" /> Run Image EDA
+                    </Button>
+                  </div>
                 )}
                 {running && (
                   <div className="flex items-center gap-3 mt-4">

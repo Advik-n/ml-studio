@@ -41,6 +41,34 @@ def _should_skip_zip_entry(name: str) -> bool:
     return False
 
 
+def _extract_nested_zips(directory: str, depth: int = 0) -> None:
+    """Recursively extract any .zip files found inside the extracted directory."""
+    if depth > 3:  # Prevent infinite nesting
+        return
+    for root, dirs, files in os.walk(directory):
+        for fname in files:
+            if fname.lower().endswith('.zip'):
+                nested_zip = os.path.join(root, fname)
+                try:
+                    if not zipfile.is_zipfile(nested_zip):
+                        continue
+                    with zipfile.ZipFile(nested_zip, 'r') as zf:
+                        for member in zf.infolist():
+                            if member.filename.startswith('/') or '..' in member.filename:
+                                continue
+                            if _should_skip_zip_entry(member.filename):
+                                continue
+                            if member.is_dir():
+                                os.makedirs(os.path.join(root, member.filename), exist_ok=True)
+                                continue
+                            zf.extract(member, root)
+                    os.remove(nested_zip)
+                    logger.info(f"Extracted nested zip: {fname} ({depth})")
+                    _extract_nested_zips(root, depth + 1)
+                except Exception as e:
+                    logger.warning(f"Failed to extract nested zip {fname}: {e}")
+
+
 @router.post("/{project_id}/upload", response_model=ImageJobResponse)
 async def upload_image_dataset(
     project_id: str,
@@ -108,6 +136,10 @@ async def upload_image_dataset(
                     zf.extract(member, job_dir)
 
             os.remove(zip_path)  # Remove zip after extraction
+
+            # Handle nested zips (zip-inside-zip)
+            _extract_nested_zips(job_dir)
+
             _zip_cache[zip_hash] = job_dir
         
         # Find the dataset root (may be nested in a folder)

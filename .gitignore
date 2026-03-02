@@ -33,3 +33,5 @@ Thumbs.db
 __pycache__/
 test_ml_service.py
 backend/test_debug.db
+.vercel
+.env*.local
