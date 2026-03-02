@@ -41,7 +41,7 @@ jobs:
               print(f'Created Space {space_id}')
 
           with open('frontend/README.md', 'w') as f:
-              f.write('---\ntitle: ML Studio\nemoji: 🧪\ncolorFrom: indigo\ncolorTo: cyan\nsdk: docker\napp_port: 7860\npinned: true\n---\n\n# ML Studio\nFull-stack ML pipeline and EDA platform.\n')
+              f.write('---\ntitle: ML Studio\nemoji: 🧪\ncolorFrom: indigo\ncolorTo: blue\nsdk: docker\napp_port: 7860\npinned: true\n---\n\n# ML Studio\nFull-stack ML pipeline and EDA platform.\n')
 
           api.upload_folder(
               folder_path='frontend',
