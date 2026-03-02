@@ -310,21 +310,43 @@ def _build_recommendations(kb_matches: List, causes: List, impact: Dict) -> List
 
 
 def _discover_classes_simple(dataset_path: str) -> Dict[str, List[str]]:
-    """Lightweight class discovery (mirrors image_service logic)."""
-    _EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
-    classes: Dict[str, List[str]] = {}
+    """Reuse the robust discovery from image_service."""
     try:
-        for entry in sorted(os.listdir(dataset_path)):
-            full = os.path.join(dataset_path, entry)
-            if not os.path.isdir(full) or entry.startswith('.'):
-                continue
-            imgs = [os.path.join(full, f) for f in os.listdir(full)
-                    if os.path.isfile(os.path.join(full, f))
-                    and os.path.splitext(f)[1].lower() in _EXTS]
-            if imgs:
-                classes[entry] = sorted(imgs)
-    except Exception as exc:
-        logger.warning(f"Class discovery failed: {exc}")
+        from services.image_service import _discover_classes
+        return _discover_classes(dataset_path)
+    except ImportError:
+        pass
+    # Fallback: multi-level scan
+    _EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif', '.heic'}
+    classes: Dict[str, List[str]] = {}
+
+    def _scan(root):
+        try:
+            for entry in sorted(os.listdir(root)):
+                full = os.path.join(root, entry)
+                if not os.path.isdir(full) or entry.startswith('.') or entry == '__MACOSX':
+                    continue
+                imgs = [os.path.join(full, f) for f in os.listdir(full)
+                        if os.path.isfile(os.path.join(full, f))
+                        and os.path.splitext(f)[1].lower() in _EXTS]
+                if imgs:
+                    classes[entry] = sorted(imgs)
+        except Exception:
+            pass
+
+    _scan(dataset_path)
+    if classes:
+        return classes
+    # Try one level deeper
+    try:
+        for sub in sorted(os.listdir(dataset_path)):
+            sub_path = os.path.join(dataset_path, sub)
+            if os.path.isdir(sub_path) and not sub.startswith('.') and sub != '__MACOSX':
+                _scan(sub_path)
+                if classes:
+                    return classes
+    except Exception:
+        pass
     return classes
 
 

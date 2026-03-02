@@ -642,7 +642,7 @@ export default function ImageEDAPage() {
                             <div className="flex items-center gap-2">
                               <Badge variant="success" className="text-[10px]">Complete</Badge>
                               <span className="text-xs text-[var(--text-muted)]">
-                                Severity: {edaResult.meditech.overall_severity_score?.toFixed(1)}%
+                                Severity: {edaResult.meditech.overall_severity?.toFixed(1)}%
                               </span>
                             </div>
                             <div className="flex gap-2">
@@ -671,9 +671,9 @@ export default function ImageEDAPage() {
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
                       {[
                         { label: "Health Score", value: `${edaResult.agritech.overall_health_score?.toFixed(1)}%`, color: edaResult.agritech.overall_health_score > 70 ? "text-green-400" : edaResult.agritech.overall_health_score > 40 ? "text-amber-400" : "text-red-400" },
-                        { label: "Classes Analyzed", value: Object.keys(edaResult.agritech.class_analysis || {}).length, color: "text-blue-400" },
-                        { label: "Disease Matches", value: edaResult.agritech.knowledge_matches?.length || 0, color: "text-purple-400" },
-                        { label: "Risk Level", value: edaResult.agritech.risk_assessment?.level || "N/A", color: edaResult.agritech.risk_assessment?.level === "HIGH" ? "text-red-400" : "text-amber-400" },
+                        { label: "Classes Analyzed", value: Object.keys(edaResult.agritech.health_scores || {}).length, color: "text-blue-400" },
+                        { label: "Disease Matches", value: edaResult.agritech.knowledge_base_matches?.length || 0, color: "text-purple-400" },
+                        { label: "Risk Level", value: (edaResult.agritech.severity_summary?.critical_classes?.length || 0) > 0 ? "HIGH" : (edaResult.agritech.severity_summary?.warning_classes?.length || 0) > 0 ? "MEDIUM" : "LOW", color: (edaResult.agritech.severity_summary?.critical_classes?.length || 0) > 0 ? "text-red-400" : "text-amber-400" },
                       ].map(s => (
                         <div key={s.label} className="rounded-lg bg-[var(--bg)] p-3">
                           <p className="text-xs text-[var(--text-muted)]">{s.label}</p>
@@ -681,11 +681,11 @@ export default function ImageEDAPage() {
                         </div>
                       ))}
                     </div>
-                    {edaResult.agritech.knowledge_matches?.length > 0 && (
+                    {edaResult.agritech.knowledge_base_matches?.length > 0 && (
                       <div className="mb-4">
                         <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Disease/Pest Matches</p>
                         <div className="space-y-2">
-                          {edaResult.agritech.knowledge_matches.map((match: any, i: number) => (
+                          {edaResult.agritech.knowledge_base_matches.map((match: any, i: number) => (
                             <div key={i} className="rounded-lg bg-green-500/5 border border-green-500/10 p-3">
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-sm font-medium text-[var(--text)]">{match.disease || match.name}</span>
@@ -727,10 +727,10 @@ export default function ImageEDAPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
                       {[
-                        { label: "Severity Score", value: `${edaResult.meditech.overall_severity_score?.toFixed(1)}%`, color: edaResult.meditech.overall_severity_score > 60 ? "text-red-400" : edaResult.meditech.overall_severity_score > 30 ? "text-amber-400" : "text-green-400" },
-                        { label: "Classes Analyzed", value: Object.keys(edaResult.meditech.class_analysis || {}).length, color: "text-blue-400" },
-                        { label: "Anomalies Found", value: edaResult.meditech.knowledge_matches?.length || 0, color: "text-purple-400" },
-                        { label: "Risk Level", value: edaResult.meditech.risk_assessment?.level || "N/A", color: edaResult.meditech.risk_assessment?.level === "HIGH" ? "text-red-400" : "text-amber-400" },
+                        { label: "Severity Score", value: `${edaResult.meditech.overall_severity?.toFixed(1)}%`, color: edaResult.meditech.overall_severity > 60 ? "text-red-400" : edaResult.meditech.overall_severity > 30 ? "text-amber-400" : "text-green-400" },
+                        { label: "Classes Analyzed", value: Object.keys(edaResult.meditech.severity_scores || {}).length, color: "text-blue-400" },
+                        { label: "Anomalies Found", value: edaResult.meditech.knowledge_base_matches?.length || 0, color: "text-purple-400" },
+                        { label: "Risk Level", value: edaResult.meditech.urgency_level || "N/A", color: edaResult.meditech.urgency_level === "HIGH" ? "text-red-400" : "text-amber-400" },
                       ].map(s => (
                         <div key={s.label} className="rounded-lg bg-[var(--bg)] p-3">
                           <p className="text-xs text-[var(--text-muted)]">{s.label}</p>
@@ -738,11 +738,11 @@ export default function ImageEDAPage() {
                         </div>
                       ))}
                     </div>
-                    {edaResult.meditech.knowledge_matches?.length > 0 && (
+                    {edaResult.meditech.knowledge_base_matches?.length > 0 && (
                       <div className="mb-4">
                         <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Condition Matches</p>
                         <div className="space-y-2">
-                          {edaResult.meditech.knowledge_matches.map((match: any, i: number) => (
+                          {edaResult.meditech.knowledge_base_matches.map((match: any, i: number) => (
                             <div key={i} className="rounded-lg bg-red-500/5 border border-red-500/10 p-3">
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-sm font-medium text-[var(--text)]">{match.condition || match.name}</span>

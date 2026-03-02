@@ -215,7 +215,10 @@ def run_meditech_analysis(
             return result
 
         # Reconstruct class -> file-list mapping from disk
-        from image_service import _discover_classes  # sibling module
+        try:
+            from services.image_service import _discover_classes  # sibling module
+        except ImportError:
+            from image_service import _discover_classes
     except ImportError:
         pass
 
@@ -439,8 +442,12 @@ def run_meditech_analysis(
 
 def _discover_classes_local(dataset_path: str) -> Dict[str, List[str]]:
     """Lightweight class discovery mirroring image_service logic."""
-    from image_service import _discover_classes
-    return _discover_classes(dataset_path)
+    try:
+        from services.image_service import _discover_classes
+        return _discover_classes(dataset_path)
+    except ImportError:
+        from image_service import _discover_classes
+        return _discover_classes(dataset_path)
 
 def _build_class_files_fallback(dataset_path: str,
                                 class_names: List[str]) -> Dict[str, List[str]]:
