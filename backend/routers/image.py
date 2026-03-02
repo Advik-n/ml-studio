@@ -275,23 +275,17 @@ async def run_image_pipeline(
     dataset_path = _get_dataset_path(job_id)
     
     try:
-        # Create a new pipeline job linked to the same dataset
-        pipeline_job_id = str(uuid.uuid4())
-        pipeline_job = ImageJob(
-            id=pipeline_job_id,
-            project_id=job.project_id,
-            job_type="image_pipeline",
-            status="processing",
-        )
-        db.add(pipeline_job)
+        # Update the existing job with pipeline results
+        job.status = "processing"
+        job.job_type = "image_pipeline"
         db.commit()
         
         result = await asyncio.to_thread(image_service.run_image_pipeline, dataset_path, config.model_dump())
         
-        pipeline_job.status = "completed"
-        pipeline_job.model_name = result["model_name"]
-        pipeline_job.accuracy = result["accuracy"]
-        pipeline_job.metrics = {
+        job.status = "completed"
+        job.model_name = result["model_name"]
+        job.accuracy = result["accuracy"]
+        job.metrics = {
             "precision": result["precision"],
             "recall": result["recall"],
             "f1_score": result["f1_score"],
@@ -309,19 +303,18 @@ async def run_image_pipeline(
             "confidence_stats": result.get("confidence_stats"),
             "feature_importance": result.get("feature_importance"),
         }
-        pipeline_job.confusion_matrix = result["confusion_matrix"]
-        pipeline_job.total_images = result["total_samples"]
-        pipeline_job.num_classes = len(result["class_names"])
-        pipeline_job.class_distribution = {name: 0 for name in result["class_names"]}
-        pipeline_job.class_names = result["class_names"]
-        pipeline_job.training_history = {
+        job.confusion_matrix = result["confusion_matrix"]
+        job.total_images = result["total_samples"]
+        job.num_classes = len(result["class_names"])
+        job.class_names = result["class_names"]
+        job.training_history = {
             "report_code": result.get("report_code", ""),
             "pipeline_report_text": result.get("pipeline_report_text", ""),
         }
         db.commit()
-        db.refresh(pipeline_job)
+        db.refresh(job)
         
-        return pipeline_job
+        return job
     except Exception as e:
         logger.exception(f"Pipeline failed: {e}")
         raise HTTPException(500, f"Pipeline failed: {str(e)}")
