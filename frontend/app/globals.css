@@ -262,3 +262,43 @@ body {
 .hover-border-glow:hover {
   animation: borderGlow 2s ease-in-out infinite;
 }
+
+/* ── Domain Cards ─────────────────────────────────────────────────────────── */
+.domain-card {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+.domain-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  background: radial-gradient(circle at 30% 30%, rgba(139, 92, 246, 0.06), transparent 70%);
+  pointer-events: none;
+}
+.domain-card:hover::before {
+  opacity: 1;
+}
+.domain-card:hover {
+  box-shadow: 0 12px 35px var(--shadow), 0 0 20px rgba(139, 92, 246, 0.1);
+}
+
+.selected-glow {
+  box-shadow: 0 0 25px rgba(139, 92, 246, 0.25), 0 8px 30px var(--shadow) !important;
+}
+
+/* ── Gradient text ────────────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Smooth section collapse ──────────────────────────────────────────────── */
+.section-collapse {
+  overflow: hidden;
+  transition: max-height 0.3s ease-in-out;
+}

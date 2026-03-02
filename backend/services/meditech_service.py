@@ -474,93 +474,137 @@ def _build_class_files_fallback(dataset_path: str,
 # Report Generation
 
 def generate_meditech_report(analysis_results: Dict[str, Any]) -> str:
-    """Generate a comprehensive plain-text medical analysis report."""
+    """Generate a comprehensive plain-text medical imaging analysis report."""
     try:
         lines: List[str] = []
-        _hr = "=" * 72
-        _g = analysis_results.get  # shorthand
+        _hr = "=" * 78
+        _g = analysis_results.get
 
-        def _section(num, title):
-            lines.append(f"{num}. {title}")
-            lines.append("-" * 40)
+        lines += [_hr, "   🏥 MEDITECH IMAGE ANALYSIS — COMPREHENSIVE REPORT", _hr, ""]
+        lines += [f"   ⚠️  {_g('disclaimer', DISCLAIMER)}", ""]
 
-        lines += [_hr, "  MEDITECH IMAGE ANALYSIS REPORT", _hr, "",
-                  f"⚠️  {_g('disclaimer', DISCLAIMER)}", ""]
-
-        _section(1, "EXECUTIVE SUMMARY")
-        lines += [f"   Overall severity : {_g('overall_severity', 0)} / 100",
-                  f"   Urgency level    : {_g('urgency_level', 'N/A')}", ""]
-
-        _section(2, "SEVERITY SCORES (per class)")
-        for cls, sev in sorted(_g("severity_scores", {}).items()):
-            bar = "█" * int(sev // 5) + "░" * (20 - int(sev // 5))
-            lines.append(f"   {cls:30s}  {sev:6.1f}  [{bar}]")
-        lines.append("")
-
+        # Executive Summary
+        lines += ["─" * 78, "  📋 1. EXECUTIVE SUMMARY", "─" * 78]
+        overall_sev = _g('overall_severity', 0)
+        urgency = _g('urgency_level', 'N/A')
+        sev_scores = _g("severity_scores", {})
         anomalies = _g("anomaly_detections", [])
-        _section(3, f"ANOMALY DETECTIONS ({len(anomalies)} found)")
+        lines += [
+            f"   Overall Severity Score:  {overall_sev:.1f} / 100",
+            f"   Urgency Level:           {urgency}",
+            f"   Classes Analyzed:        {len(sev_scores)}",
+            f"   Anomalies Detected:      {len(anomalies)}",
+            f"   Analysis Engine:         ML Studio MediTech v2.0",
+            "",
+        ]
+
+        # Severity Scores
+        lines += ["─" * 78, "  📊 2. SEVERITY SCORES (Per Class)", "─" * 78]
+        for cls, sev in sorted(sev_scores.items(), key=lambda x: x[1], reverse=True):
+            bar = "█" * int(sev // 5) + "░" * (20 - int(sev // 5))
+            tag = "🔴" if sev >= 60 else "⚠️" if sev >= 30 else "✅"
+            lines.append(f"   {tag} {cls:30s}  {sev:6.1f}%  [{bar}]")
+        lines.append("")
+
+        # Anomaly Detections
+        lines += ["─" * 78, f"  🔬 3. ANOMALY DETECTIONS ({len(anomalies)} found)", "─" * 78]
         for a in anomalies:
-            lines.append(f"   [{a.get('class','?')}] {a.get('type','')} "
-                         f"(confidence {a.get('confidence',0):.0%})")
-            lines.append(f"      {a.get('description', '')}")
-        lines.append("")
+            conf = a.get('confidence', 0)
+            conf_bar = "●" * int(conf * 10) + "○" * (10 - int(conf * 10))
+            lines.append(f"   Class:       {a.get('class', '?')}")
+            lines.append(f"   Type:        {a.get('type', '')}")
+            lines.append(f"   Confidence:  {conf:.0%}  [{conf_bar}]")
+            lines.append(f"   Detail:      {a.get('description', '')}")
+            lines.append("")
 
-        _section(4, "TISSUE ANALYSIS")
-        for cls, info in _g("tissue_analysis", {}).items():
-            lines.append(f"   Class: {cls}  Mean={info.get('mean_pixel_rgb',[])}  "
-                         f"Std={info.get('std_pixel_rgb',[])}")
+        # Tissue Analysis
+        tissue = _g("tissue_analysis", {})
+        lines += ["─" * 78, f"  🧬 4. TISSUE ANALYSIS ({len(tissue)} classes)", "─" * 78]
+        for cls, info in tissue.items():
+            lines.append(f"   ■ Class: {cls}")
+            mean_rgb = info.get('mean_pixel_rgb', [])
+            std_rgb = info.get('std_pixel_rgb', [])
+            if mean_rgb:
+                lines.append(f"     Mean RGB:  [{', '.join(f'{v:.1f}' for v in mean_rgb)}]")
+            if std_rgb:
+                lines.append(f"     Std RGB:   [{', '.join(f'{v:.1f}' for v in std_rgb)}]")
             for interp in info.get("dominant_interpretations", []):
-                lines.append(f"      → {interp.get('pigment','')}: {interp.get('significance','')}")
+                lines.append(f"     → {interp.get('pigment', '')}: {interp.get('significance', '')}")
+            lines.append("")
+
+        # Color Profiles
+        color_profiles = _g("color_profiles", {})
+        lines += ["─" * 78, f"  🎨 5. COLOR PROFILES ({len(color_profiles)} classes)", "─" * 78]
+        for cls, cp in color_profiles.items():
+            lines.append(f"   {cls}: dominant={cp.get('dominant_channel', '')}  "
+                         f"mean={cp.get('mean_rgb', [])}  std={cp.get('std_rgb', [])}")
         lines.append("")
 
-        _section(5, "COLOUR PROFILES")
-        for cls, cp in _g("color_profiles", {}).items():
-            lines.append(f"   {cls}: dominant={cp.get('dominant_channel','')}  "
-                         f"mean={cp.get('mean_rgb',[])}  std={cp.get('std_rgb',[])}")
+        # Texture Analysis (GLCM)
+        texture = _g("texture_analysis", {})
+        lines += ["─" * 78, f"  🔍 6. TEXTURE ANALYSIS — GLCM ({len(texture)} classes)", "─" * 78]
+        for cls, tex in texture.items():
+            lines.append(f"   ■ {cls}")
+            for k, v in tex.items():
+                lines.append(f"     {k:20s}: {v:.4f}")
         lines.append("")
 
-        _section(6, "TEXTURE ANALYSIS (GLCM)")
-        for cls, tex in _g("texture_analysis", {}).items():
-            lines.append(f"   {cls}: {'  '.join(f'{k}={v:.4f}' for k, v in tex.items())}")
-        lines.append("")
-
+        # Cause Analysis
         causes = _g("cause_analysis", [])
-        _section(7, f"CAUSE ANALYSIS ({len(causes)} entries)")
+        lines += ["─" * 78, f"  🔍 7. CAUSE ANALYSIS ({len(causes)} entries)", "─" * 78]
         for c in causes:
-            lines.append(f"   [{c.get('class','?')}] {', '.join(c.get('potential_causes',[]))}")
-        lines.append("")
+            lines.append(f"   Class:             {c.get('class', '?')}")
+            lines.append(f"   Potential Causes:  {', '.join(c.get('potential_causes', []))}")
+            lines.append(f"   Contributing:      {', '.join(c.get('contributing_factors', []))}")
+            lines.append("")
 
+        # Effect Analysis
         effects = _g("effect_analysis", [])
-        _section(8, f"EFFECT ANALYSIS ({len(effects)} entries)")
+        lines += ["─" * 78, f"  📉 8. EFFECT ANALYSIS ({len(effects)} entries)", "─" * 78]
         for e in effects:
-            lines.append(f"   [{e.get('class','?')}] {e.get('description','')}")
-        lines.append("")
+            lines.append(f"   Class:       {e.get('class', '?')}")
+            lines.append(f"   Effect:      {e.get('description', '')}")
+            lines.append(f"   Progression: {e.get('progression', 'Unknown')}")
+            lines.append("")
 
+        # Impact Assessment
         impact = _g("impact_assessment", {})
-        _section(9, "IMPACT ASSESSMENT")
-        lines.append(f"   {impact.get('summary', 'N/A')}")
+        lines += ["─" * 78, "  💥 9. IMPACT ASSESSMENT", "─" * 78]
+        lines.append(f"   Summary: {impact.get('summary', 'N/A')}")
         above50 = impact.get("classes_above_50", [])
         if above50:
-            lines.append(f"   Classes ≥50: {', '.join(above50)}")
+            lines.append(f"   High-Risk Classes (≥50%): {', '.join(above50)}")
         lines.append("")
 
+        # Future Risk Assessment
         risks = _g("future_risks", [])
-        _section(10, f"FUTURE RISK ASSESSMENT ({len(risks)} flagged)")
+        lines += ["─" * 78, f"  ⚠️  10. FUTURE RISK ASSESSMENT ({len(risks)} flagged)", "─" * 78]
         for r in risks:
-            lines.append(f"   [{r.get('class','?')}] sev={r.get('severity',0):.1f} — {r.get('risk','')}")
-        lines.append("")
+            lines.append(f"   Class:       {r.get('class', '?')}")
+            lines.append(f"   Severity:    {r.get('severity', 0):.1f}%")
+            lines.append(f"   Risk:        {r.get('risk', '')}")
+            lines.append(f"   Monitoring:  {r.get('monitoring', 'Regular follow-up recommended')}")
+            lines.append("")
 
+        # Knowledge Base Matches
         kb = _g("knowledge_base_matches", [])
-        _section(11, f"KNOWLEDGE BASE MATCHES ({len(kb)})")
+        lines += ["─" * 78, f"  📚 11. KNOWLEDGE BASE — DETECTION & PREVENTION ({len(kb)} matches)", "─" * 78]
         for m in kb:
-            lines.append(f"   [{m.get('class','?')}] {m.get('name','')} "
-                         f"— risk={m.get('risk_level','')} urgency={m.get('urgency','')}")
+            lines.append(f"\n   ■ {m.get('name', '').upper()} (Risk: {m.get('risk_level', '')})")
+            lines.append(f"     Class:        {m.get('class', '?')}")
+            lines.append(f"     Urgency:      {m.get('urgency', 'N/A')}")
+            lines.append(f"     Description:  {m.get('description', '')}")
+            lines.append(f"     Indicators:   {m.get('indicators', 'See anomaly detections')}")
+            lines.append(f"     Prevention:   {m.get('prevention', 'Early screening recommended')}")
         lines.append("")
 
-        _section(12, "RECOMMENDATIONS")
-        for rec in _g("recommendations", []):
-            lines.append(f"   • {rec}")
-        lines += ["", _hr, "  END OF REPORT", _hr]
+        # Recommendations
+        recs = _g("recommendations", [])
+        lines += ["─" * 78, f"  ✅ 12. RECOMMENDATIONS & CLINICAL GUIDANCE", "─" * 78]
+        for i, rec in enumerate(recs, 1):
+            lines.append(f"   {i}. {rec}")
+        lines += ["", _hr, "  Report generated by ML Studio — MediTech Analysis Engine v2.0"]
+        lines += [f"  ⚠️  {DISCLAIMER}", _hr]
 
         return "\n".join(lines)
 

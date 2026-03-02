@@ -16,6 +16,7 @@ from schemas.image import ImageJobResponse, ImagePipelineConfig, ImageEDAConfig
 from models.project import Project
 from services import image_service
 from services import agritech_service, meditech_service
+from services import chart_service
 from utils.dependencies import require_verified_user
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,14 @@ async def run_image_eda(
             file_type=eda_config.file_type,
         )
         
+        # Generate charts
+        try:
+            charts = await asyncio.to_thread(chart_service.generate_eda_charts, result)
+            result["charts"] = charts
+        except Exception as chart_err:
+            logger.warning(f"Chart generation failed (non-fatal): {chart_err}")
+            result["charts"] = {}
+
         job.status = "completed"
         job.total_images = result["total_images"]
         job.num_classes = result["num_classes"]
@@ -383,6 +392,12 @@ async def run_agritech(
         updated["agritech"] = result
         updated["agritech_report_text"] = agritech_service.generate_agritech_report(result)
         updated["agritech_code"] = agritech_service.generate_agritech_code(result)
+        # Generate domain charts
+        try:
+            agri_charts = await asyncio.to_thread(chart_service.generate_agritech_charts, result)
+            updated["agritech"]["charts"] = agri_charts
+        except Exception:
+            pass
         job.eda_report = updated
         db.commit()
         db.refresh(job)
@@ -423,6 +438,12 @@ async def run_meditech(
         updated["meditech"] = result
         updated["meditech_report_text"] = meditech_service.generate_meditech_report(result)
         updated["meditech_code"] = meditech_service.generate_meditech_code(result)
+        # Generate domain charts
+        try:
+            medi_charts = await asyncio.to_thread(chart_service.generate_meditech_charts, result)
+            updated["meditech"]["charts"] = medi_charts
+        except Exception:
+            pass
         job.eda_report = updated
         db.commit()
         db.refresh(job)
