@@ -7,9 +7,5 @@ uploads/
 __pycache__/
 *.pyc
 venv/
-.git/
-node_modules/
 img-testing/
 aiml/
-*.csv
-.next/
