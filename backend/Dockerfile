@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps for matplotlib/scipy
+# Install system deps for opencv, matplotlib, scipy
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libgomp1 && \
+    gcc g++ libgomp1 libgl1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

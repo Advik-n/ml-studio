@@ -18,7 +18,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: cd backend && pip install -r requirements.txt
       - name: Import test
-        run: cd backend && python -c "from main import app; from services import eda_service, ml_service; print('All imports OK')"
+        run: cd backend && python -c "from main import app; from services import eda_service, ml_service, image_service; print('All imports OK')"
       - name: API health test
         run: |
           cd backend

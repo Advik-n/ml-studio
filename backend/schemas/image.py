@@ -28,6 +28,19 @@ class ImageJobResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ImageEDAConfig(BaseModel):
+    file_type: str = "image"  # image, csv, txt, json — for future NLP processing
+    max_sample: int = 500
+
+    @field_validator('file_type')
+    @classmethod
+    def validate_file_type(cls, v):
+        allowed = {"image", "csv", "txt", "json", "tsv", "parquet", "jsonl"}
+        if v not in allowed:
+            raise ValueError(f'file_type must be one of {allowed}')
+        return v
+
+
 class ImagePipelineConfig(BaseModel):
     model_name: str = "RandomForest"
     target_size: List[int] = [128, 128]
@@ -37,6 +50,7 @@ class ImagePipelineConfig(BaseModel):
     feature_method: str = "hog"  # hog, lbp, combined
     use_pca: bool = False
     pca_components: int = 100
+    file_type: str = "image"  # image, csv, txt, json — for future NLP processing
     hyperparams: Optional[Dict[str, Any]] = None
 
     @field_validator('target_size')
