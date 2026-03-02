@@ -15,6 +15,6 @@ COPY . .
 # Create local fallback dirs (persistent storage is at /data on HF Spaces)
 RUN mkdir -p uploads /data/db /data/uploads
 
-EXPOSE 7860
+EXPOSE 7860 10000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}

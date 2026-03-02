@@ -15,6 +15,7 @@ from models.user import User
 from schemas.image import ImageJobResponse, ImagePipelineConfig, ImageEDAConfig
 from models.project import Project
 from services import image_service
+from services import agritech_service, meditech_service
 from utils.dependencies import require_verified_user
 
 logger = logging.getLogger(__name__)
@@ -320,6 +321,96 @@ async def run_image_pipeline(
         raise HTTPException(500, f"Pipeline failed: {str(e)}")
 
 
+# ── Domain-Specific Analysis Endpoints ─────────────────────────────────────────
+
+from pydantic import BaseModel as _BM
+
+class DomainAnalysisConfig(_BM):
+    max_sample: int = 500
+
+
+@router.post("/jobs/{job_id}/run-agritech", response_model=ImageJobResponse)
+async def run_agritech(
+    job_id: str,
+    config: DomainAnalysisConfig = DomainAnalysisConfig(),
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Run AgriTech domain analysis on an image dataset (requires EDA first)."""
+    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
+
+    # Need EDA results first
+    eda_results = job.eda_report if isinstance(job.eda_report, dict) else {}
+    dataset_path = _get_dataset_path(job_id)
+
+    try:
+        result = await asyncio.to_thread(
+            agritech_service.run_agritech_analysis,
+            dataset_path, eda_results, config.max_sample
+        )
+        # Store domain results in eda_report alongside existing data
+        if not isinstance(job.eda_report, dict):
+            job.eda_report = {}
+        updated = dict(job.eda_report)
+        updated["agritech"] = result
+        updated["agritech_report_text"] = agritech_service.generate_agritech_report(result)
+        updated["agritech_code"] = agritech_service.generate_agritech_code(result)
+        job.eda_report = updated
+        db.commit()
+        db.refresh(job)
+        return job
+    except Exception as e:
+        logger.exception(f"AgriTech analysis failed: {e}")
+        raise HTTPException(500, f"AgriTech analysis failed: {str(e)}")
+
+
+@router.post("/jobs/{job_id}/run-meditech", response_model=ImageJobResponse)
+async def run_meditech(
+    job_id: str,
+    config: DomainAnalysisConfig = DomainAnalysisConfig(),
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Run MediTech domain analysis on an image dataset (requires EDA first)."""
+    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
+
+    eda_results = job.eda_report if isinstance(job.eda_report, dict) else {}
+    dataset_path = _get_dataset_path(job_id)
+
+    try:
+        result = await asyncio.to_thread(
+            meditech_service.run_meditech_analysis,
+            dataset_path, eda_results, config.max_sample
+        )
+        if not isinstance(job.eda_report, dict):
+            job.eda_report = {}
+        updated = dict(job.eda_report)
+        updated["meditech"] = result
+        updated["meditech_report_text"] = meditech_service.generate_meditech_report(result)
+        updated["meditech_code"] = meditech_service.generate_meditech_code(result)
+        job.eda_report = updated
+        db.commit()
+        db.refresh(job)
+        return job
+    except Exception as e:
+        logger.exception(f"MediTech analysis failed: {e}")
+        raise HTTPException(500, f"MediTech analysis failed: {str(e)}")
+
+
 @router.get("/jobs/{job_id}", response_model=ImageJobResponse)
 async def get_image_job(
     job_id: str,
@@ -478,6 +569,89 @@ async def download_eda_report(
         media_type="text/plain",
         headers={"Content-Disposition": f"attachment; filename=eda_report_{job_id[:8]}.txt"},
     )
+
+
+# ── Domain Report Download Endpoints ──────────────────────────────────────────
+
+def _get_verified_job(job_id: str, current_user: User, db: Session) -> ImageJob:
+    """Helper: get a completed job with access check."""
+    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
+    return job
+
+
+@router.get("/jobs/{job_id}/download-agritech-report")
+async def download_agritech_report(
+    job_id: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download AgriTech analysis report."""
+    job = _get_verified_job(job_id, current_user, db)
+    text = ""
+    if isinstance(job.eda_report, dict):
+        text = job.eda_report.get("agritech_report_text", "")
+    if not text:
+        raise HTTPException(400, "No AgriTech report available. Run AgriTech analysis first.")
+    return Response(content=text, media_type="text/plain",
+                    headers={"Content-Disposition": f"attachment; filename=agritech_report_{job_id[:8]}.txt"})
+
+
+@router.get("/jobs/{job_id}/download-agritech-code")
+async def download_agritech_code(
+    job_id: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download AgriTech analysis Python code."""
+    job = _get_verified_job(job_id, current_user, db)
+    code = ""
+    if isinstance(job.eda_report, dict):
+        code = job.eda_report.get("agritech_code", "")
+    if not code:
+        raise HTTPException(400, "No AgriTech code available. Run AgriTech analysis first.")
+    return Response(content=code, media_type="text/x-python",
+                    headers={"Content-Disposition": f"attachment; filename=agritech_analysis_{job_id[:8]}.py"})
+
+
+@router.get("/jobs/{job_id}/download-meditech-report")
+async def download_meditech_report(
+    job_id: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download MediTech analysis report."""
+    job = _get_verified_job(job_id, current_user, db)
+    text = ""
+    if isinstance(job.eda_report, dict):
+        text = job.eda_report.get("meditech_report_text", "")
+    if not text:
+        raise HTTPException(400, "No MediTech report available. Run MediTech analysis first.")
+    return Response(content=text, media_type="text/plain",
+                    headers={"Content-Disposition": f"attachment; filename=meditech_report_{job_id[:8]}.txt"})
+
+
+@router.get("/jobs/{job_id}/download-meditech-code")
+async def download_meditech_code(
+    job_id: str,
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Download MediTech analysis Python code."""
+    job = _get_verified_job(job_id, current_user, db)
+    code = ""
+    if isinstance(job.eda_report, dict):
+        code = job.eda_report.get("meditech_code", "")
+    if not code:
+        raise HTTPException(400, "No MediTech code available. Run MediTech analysis first.")
+    return Response(content=code, media_type="text/x-python",
+                    headers={"Content-Disposition": f"attachment; filename=meditech_analysis_{job_id[:8]}.py"})
 
 
 def _find_dataset_root(job_dir: str) -> str:

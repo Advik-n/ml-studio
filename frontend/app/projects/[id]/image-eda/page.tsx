@@ -1,8 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image, Upload, BarChart2, Eye, AlertTriangle, Copy, CheckCircle2, Download, FileText, Code, Shield, Zap, Info } from "lucide-react";
+import { Image, Upload, BarChart2, Eye, AlertTriangle, Copy, CheckCircle2, Download, FileText, Code, Shield, Zap, Info, Leaf, HeartPulse, Bug, Microscope, Activity } from "lucide-react";
 import Navbar from "@/components/layout/navbar";
 import Sidebar from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,10 @@ export default function ImageEDAPage() {
   const [edaResult, setEdaResult] = useState<any>(null);
   const [fileType, setFileType] = useState("image");
   const [maxSample, setMaxSample] = useState(500);
+  const [runningAgritech, setRunningAgritech] = useState(false);
+  const [runningMeditech, setRunningMeditech] = useState(false);
+  const searchParams = useSearchParams();
+  const domain = searchParams.get("domain");
 
   const fetchData = useCallback(async () => {
     try {
@@ -95,6 +99,22 @@ export default function ImageEDAPage() {
       toast.error(extractApiError(err, "EDA failed"));
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handleRunDomain = async (domainType: "agritech" | "meditech") => {
+    if (!job) return;
+    const setter = domainType === "agritech" ? setRunningAgritech : setRunningMeditech;
+    setter(true);
+    try {
+      const res = await api.post(`/image/jobs/${job.id}/run-${domainType}`, { domain: domainType }, { timeout: 600000 });
+      setJob(res.data);
+      if (res.data.eda_report) setEdaResult(res.data.eda_report);
+      toast.success(`${domainType === "agritech" ? "AgriTech" : "MediTech"} analysis complete!`);
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, `${domainType} analysis failed`));
+    } finally {
+      setter(false);
     }
   };
 
@@ -548,6 +568,204 @@ export default function ImageEDAPage() {
                         </div>
                       ))}
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Domain Analysis Section */}
+              {edaResult && (
+                <Card className="card-hover-glow border-[var(--border)]">
+                  <CardContent className="p-5">
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-4 flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-indigo-400" /> Domain-Specific Analysis
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)] mb-4">
+                      Run specialized analysis on your dataset. Requires EDA to be completed first.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* AgriTech */}
+                      <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Leaf className="h-4 w-4 text-green-400" />
+                          <span className="text-sm font-semibold text-[var(--text)]">AgriTech Analysis</span>
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mb-3">
+                          Crop disease detection, pest analysis, health scoring, treatment recommendations
+                        </p>
+                        <Button
+                          size="sm"
+                          onClick={() => handleRunDomain("agritech")}
+                          isLoading={runningAgritech}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <Leaf className="h-3.5 w-3.5" /> {edaResult.agritech ? "Re-run" : "Run"} AgriTech
+                        </Button>
+                        {edaResult.agritech && (
+                          <div className="mt-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="success" className="text-[10px]">Complete</Badge>
+                              <span className="text-xs text-[var(--text-muted)]">
+                                Health Score: {edaResult.agritech.overall_health_score?.toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button variant="secondary" size="sm" className="flex-1 text-xs" onClick={() => downloadFile(`/image/jobs/${job.id}/download-agritech-report`, `agritech_report_${job.id.slice(0, 8)}.txt`, "text/plain")}>
+                                <FileText className="h-3 w-3" /> Report
+                              </Button>
+                              <Button variant="secondary" size="sm" className="flex-1 text-xs" onClick={() => downloadFile(`/image/jobs/${job.id}/download-agritech-code`, `agritech_analysis_${job.id.slice(0, 8)}.py`, "text/x-python")}>
+                                <Code className="h-3 w-3" /> Code
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* MediTech */}
+                      <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <HeartPulse className="h-4 w-4 text-red-400" />
+                          <span className="text-sm font-semibold text-[var(--text)]">MediTech Analysis</span>
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mb-3">
+                          Medical image analysis, anomaly detection, severity scoring, clinical insights
+                        </p>
+                        <Button
+                          size="sm"
+                          onClick={() => handleRunDomain("meditech")}
+                          isLoading={runningMeditech}
+                          className="w-full bg-red-600 hover:bg-red-700 text-white"
+                        >
+                          <HeartPulse className="h-3.5 w-3.5" /> {edaResult.meditech ? "Re-run" : "Run"} MediTech
+                        </Button>
+                        {edaResult.meditech && (
+                          <div className="mt-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="success" className="text-[10px]">Complete</Badge>
+                              <span className="text-xs text-[var(--text-muted)]">
+                                Severity: {edaResult.meditech.overall_severity_score?.toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button variant="secondary" size="sm" className="flex-1 text-xs" onClick={() => downloadFile(`/image/jobs/${job.id}/download-meditech-report`, `meditech_report_${job.id.slice(0, 8)}.txt`, "text/plain")}>
+                                <FileText className="h-3 w-3" /> Report
+                              </Button>
+                              <Button variant="secondary" size="sm" className="flex-1 text-xs" onClick={() => downloadFile(`/image/jobs/${job.id}/download-meditech-code`, `meditech_analysis_${job.id.slice(0, 8)}.py`, "text/x-python")}>
+                                <Code className="h-3 w-3" /> Code
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* AgriTech Results */}
+              {edaResult?.agritech && (
+                <Card className="card-hover-glow border-green-500/20">
+                  <CardContent className="p-5">
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-4 flex items-center gap-2">
+                      <Leaf className="h-4 w-4 text-green-400" /> AgriTech Analysis Results
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
+                      {[
+                        { label: "Health Score", value: `${edaResult.agritech.overall_health_score?.toFixed(1)}%`, color: edaResult.agritech.overall_health_score > 70 ? "text-green-400" : edaResult.agritech.overall_health_score > 40 ? "text-amber-400" : "text-red-400" },
+                        { label: "Classes Analyzed", value: Object.keys(edaResult.agritech.class_analysis || {}).length, color: "text-blue-400" },
+                        { label: "Disease Matches", value: edaResult.agritech.knowledge_matches?.length || 0, color: "text-purple-400" },
+                        { label: "Risk Level", value: edaResult.agritech.risk_assessment?.level || "N/A", color: edaResult.agritech.risk_assessment?.level === "HIGH" ? "text-red-400" : "text-amber-400" },
+                      ].map(s => (
+                        <div key={s.label} className="rounded-lg bg-[var(--bg)] p-3">
+                          <p className="text-xs text-[var(--text-muted)]">{s.label}</p>
+                          <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {edaResult.agritech.knowledge_matches?.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Disease/Pest Matches</p>
+                        <div className="space-y-2">
+                          {edaResult.agritech.knowledge_matches.map((match: any, i: number) => (
+                            <div key={i} className="rounded-lg bg-green-500/5 border border-green-500/10 p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-medium text-[var(--text)]">{match.disease || match.name}</span>
+                                <Badge variant="processing" className="text-[10px]">{(match.confidence * 100).toFixed(0)}% match</Badge>
+                              </div>
+                              {match.treatment && <p className="text-xs text-[var(--text-muted)]">Treatment: {match.treatment}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {edaResult.agritech.recommendations?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Recommendations</p>
+                        <div className="space-y-1">
+                          {edaResult.agritech.recommendations.map((rec: string, i: number) => (
+                            <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+                              <span className="text-green-400">•</span> {rec}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* MediTech Results */}
+              {edaResult?.meditech && (
+                <Card className="card-hover-glow border-red-500/20">
+                  <CardContent className="p-5">
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-4 flex items-center gap-2">
+                      <HeartPulse className="h-4 w-4 text-red-400" /> MediTech Analysis Results
+                    </h3>
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2.5 mb-4">
+                      <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" /> Medical Disclaimer: This analysis is for research purposes only. Not for clinical diagnosis.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
+                      {[
+                        { label: "Severity Score", value: `${edaResult.meditech.overall_severity_score?.toFixed(1)}%`, color: edaResult.meditech.overall_severity_score > 60 ? "text-red-400" : edaResult.meditech.overall_severity_score > 30 ? "text-amber-400" : "text-green-400" },
+                        { label: "Classes Analyzed", value: Object.keys(edaResult.meditech.class_analysis || {}).length, color: "text-blue-400" },
+                        { label: "Anomalies Found", value: edaResult.meditech.knowledge_matches?.length || 0, color: "text-purple-400" },
+                        { label: "Risk Level", value: edaResult.meditech.risk_assessment?.level || "N/A", color: edaResult.meditech.risk_assessment?.level === "HIGH" ? "text-red-400" : "text-amber-400" },
+                      ].map(s => (
+                        <div key={s.label} className="rounded-lg bg-[var(--bg)] p-3">
+                          <p className="text-xs text-[var(--text-muted)]">{s.label}</p>
+                          <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {edaResult.meditech.knowledge_matches?.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Condition Matches</p>
+                        <div className="space-y-2">
+                          {edaResult.meditech.knowledge_matches.map((match: any, i: number) => (
+                            <div key={i} className="rounded-lg bg-red-500/5 border border-red-500/10 p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-medium text-[var(--text)]">{match.condition || match.name}</span>
+                                <Badge variant="processing" className="text-[10px]">{(match.confidence * 100).toFixed(0)}% match</Badge>
+                              </div>
+                              {match.severity && <p className="text-xs text-[var(--text-muted)]">Severity: {match.severity}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {edaResult.meditech.recommendations?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Clinical Recommendations</p>
+                        <div className="space-y-1">
+                          {edaResult.meditech.recommendations.map((rec: string, i: number) => (
+                            <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+                              <span className="text-red-400">•</span> {rec}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}

@@ -45,8 +45,9 @@ def _run_migrations(eng):
     # image_jobs migrations
     if "image_jobs" in insp.get_table_names():
         existing = {c["name"] for c in insp.get_columns("image_jobs")}
+        # Use TEXT for cross-DB compat (SQLite + PostgreSQL)
         migrations = [
-            ("class_names", "JSON"),
+            ("class_names", "TEXT"),
         ]
         with eng.begin() as conn:
             for col_name, col_type in migrations:

@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image, Plus, ArrowRight, Sparkles, Layers, Eye, GitBranch } from "lucide-react";
+import { Image, Plus, ArrowRight, Sparkles, Layers, Eye, GitBranch, Leaf, HeartPulse, Microscope, Bug } from "lucide-react";
 import Navbar from "@/components/layout/navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -127,25 +127,117 @@ export default function ImageProcessingPage() {
                 </CardContent>
               </Card>
             </motion.div>
+          </div>
+        </div>
 
+        {/* AgriTech Section */}
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <Leaf className="h-4 w-4 text-green-500" />
+            <h2 className="text-lg font-semibold text-[var(--text)]">AgriTech</h2>
+            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-400">Agriculture</Badge>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-6">
             <motion.div whileHover={{ y: -3 }} transition={{ duration: 0.2 }}>
-              <Card className="card-hover-glow border-[var(--border)] h-full border-dashed opacity-60">
+              <Card className="card-hover-glow cursor-pointer border-[var(--border)] h-full" onClick={() => projects.length > 0 ? router.push(`/projects/${projects[0].id}/image-eda?domain=agritech`) : router.push("/projects?create=image")}>
                 <CardContent className="p-5">
                   <div className="flex items-center gap-3 mb-3">
-                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center">
-                      <Sparkles className="h-4 w-4 text-emerald-400" />
+                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-green-500/20 to-emerald-500/20 flex items-center justify-center">
+                      <Leaf className="h-4 w-4 text-green-400" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-[var(--text)]">Domain-Specific</p>
-                      <p className="text-[10px] text-[var(--text-muted)]">Coming soon</p>
+                      <p className="text-sm font-semibold text-[var(--text)]">Crop Disease Detection</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">AI-powered plant analysis</p>
                     </div>
                   </div>
                   <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                    Medical imaging, satellite imagery, defect detection, and more specialized pipelines
+                    Detect crop diseases, pest damage, nutrient deficiency. Get health scores, cause-effect analysis & treatment recommendations.
                   </p>
                   <div className="flex flex-wrap gap-1 mt-3">
-                    {["Medical", "Satellite", "Industrial"].map(t => (
-                      <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">{t}</span>
+                    {["Disease", "Pest", "Health Score", "Treatment"].map(t => (
+                      <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">{t}</span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div whileHover={{ y: -3 }} transition={{ duration: 0.2 }}>
+              <Card className="card-hover-glow cursor-pointer border-[var(--border)] h-full" onClick={() => projects.length > 0 ? router.push(`/projects/${projects[0].id}/image-pipeline?domain=agritech`) : router.push("/projects?create=image")}>
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-lime-500/20 to-green-500/20 flex items-center justify-center">
+                      <Bug className="h-4 w-4 text-lime-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--text)]">Pest & Impact Analysis</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">Environmental assessment</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                    Analyze pest patterns, environmental stress, yield impact prediction & risk assessment with detailed knowledge base.
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-3">
+                    {["Risk", "Yield Impact", "Climate", "Report"].map(t => (
+                      <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-lime-500/10 text-lime-400">{t}</span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        </div>
+
+        {/* MediTech Section */}
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <HeartPulse className="h-4 w-4 text-red-500" />
+            <h2 className="text-lg font-semibold text-[var(--text)]">MediTech</h2>
+            <Badge variant="default" className="text-[10px] bg-red-500/20 text-red-400">Healthcare</Badge>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-6">
+            <motion.div whileHover={{ y: -3 }} transition={{ duration: 0.2 }}>
+              <Card className="card-hover-glow cursor-pointer border-[var(--border)] h-full" onClick={() => projects.length > 0 ? router.push(`/projects/${projects[0].id}/image-eda?domain=meditech`) : router.push("/projects?create=image")}>
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-red-500/20 to-rose-500/20 flex items-center justify-center">
+                      <HeartPulse className="h-4 w-4 text-red-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--text)]">Medical Image Analysis</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">Clinical-grade insights</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                    Anomaly detection, tissue analysis, severity scoring. Analyze skin lesions, X-rays, retinal images with medical knowledge base.
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-3">
+                    {["Anomaly", "Severity", "Tissue", "Diagnosis"].map(t => (
+                      <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{t}</span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div whileHover={{ y: -3 }} transition={{ duration: 0.2 }}>
+              <Card className="card-hover-glow cursor-pointer border-[var(--border)] h-full" onClick={() => projects.length > 0 ? router.push(`/projects/${projects[0].id}/image-pipeline?domain=meditech`) : router.push("/projects?create=image")}>
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-rose-500/20 to-pink-500/20 flex items-center justify-center">
+                      <Microscope className="h-4 w-4 text-rose-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--text)]">Pathology & Risk</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">Cause-effect intelligence</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                    Cause analysis, effect assessment, impact scoring, future risk prediction with comprehensive medical report generation.
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-3">
+                    {["Cause", "Effect", "Impact", "Risk"].map(t => (
+                      <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400">{t}</span>
                     ))}
                   </div>
                 </CardContent>
