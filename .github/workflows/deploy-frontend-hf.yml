@@ -1,0 +1,55 @@
+name: Deploy Frontend to HuggingFace Spaces
+
+on:
+  push:
+    branches: [main]
+    paths: [frontend/**]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Deploy frontend to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 -c "
+          from huggingface_hub import HfApi
+          import os
+
+          token = os.environ['HF_TOKEN']
+          api = HfApi(token=token)
+          user = api.whoami()
+          username = user['name']
+          space_id = f'{username}/ml-studio'
+
+          try:
+              api.repo_info(repo_id=space_id, repo_type='space')
+              print(f'Space {space_id} exists')
+          except:
+              api.create_repo(repo_id=space_id, repo_type='space', space_sdk='docker', private=False)
+              print(f'Created Space {space_id}')
+
+          with open('frontend/README.md', 'w') as f:
+              f.write('---\ntitle: ML Studio\nemoji: 🧪\ncolorFrom: indigo\ncolorTo: cyan\nsdk: docker\napp_port: 7860\npinned: true\n---\n\n# ML Studio\nFull-stack ML pipeline and EDA platform.\n')
+
+          api.upload_folder(
+              folder_path='frontend',
+              repo_id=space_id,
+              repo_type='space',
+              ignore_patterns=['node_modules/**','.next/**','.vercel/**','*.tsbuildinfo','next-env.d.ts','.env.local'],
+          )
+
+          os.remove('frontend/README.md')
+          print(f'✅ Frontend deployed to https://{username}-ml-studio.hf.space')
+          "
