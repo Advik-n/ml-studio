@@ -49,24 +49,23 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
     setJob(initialJob);
   }, [initialJob]);
 
-  // Poll for updates while processing
+  // Poll for updates with exponential backoff
   useEffect(() => {
     if (job.status === "completed" || job.status === "failed") return;
-
-    const interval = setInterval(async () => {
+    let delay = 2000;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
         const response = await api.get<EDAJob>(`/eda/jobs/${job.id}`);
         setJob(response.data);
         onUpdate?.(response.data);
-        if (response.data.status === "completed" || response.data.status === "failed") {
-          clearInterval(interval);
-        }
-      } catch {
-        // Silent fail during polling
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
+        if (response.data.status === "completed" || response.data.status === "failed") return;
+      } catch { /* silent */ }
+      delay = Math.min(delay * 1.5, 10000);
+      timer = setTimeout(poll, delay);
+    };
+    timer = setTimeout(poll, delay);
+    return () => clearTimeout(timer);
   }, [job.id, job.status, onUpdate]);
 
   const currentStepIndex = getStepIndex(job.status);

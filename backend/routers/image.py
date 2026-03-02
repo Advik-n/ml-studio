@@ -27,8 +27,29 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_EXTENSIONS = {".zip"}
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
 
-# Simple in-memory cache for zip hashes to avoid re-extraction
-_zip_cache: dict = {}
+# LRU cache for zip hashes (max 50 entries)
+from functools import lru_cache
+from collections import OrderedDict
+
+class _LRUCache:
+    def __init__(self, maxsize=50):
+        self._data: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+    def get(self, key, default=None):
+        if key in self._data:
+            self._data.move_to_end(key)
+            return self._data[key]
+        return default
+    def __setitem__(self, key, value):
+        if key in self._data:
+            self._data.move_to_end(key)
+        self._data[key] = value
+        while len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+    def __contains__(self, key):
+        return key in self._data
+
+_zip_cache = _LRUCache(50)
 
 SKIP_ZIP_ENTRIES = {'__MACOSX', '.DS_Store', 'Thumbs.db', '._.'}
 

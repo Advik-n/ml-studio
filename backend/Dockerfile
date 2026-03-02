@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps for opencv, matplotlib, scipy
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libgomp1 libgl1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
@@ -12,9 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Create local fallback dirs (persistent storage is at /data on HF Spaces)
-RUN mkdir -p uploads /data/db /data/uploads
+RUN mkdir -p uploads
 
-EXPOSE 7860 10000
+EXPOSE 8080
 
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}

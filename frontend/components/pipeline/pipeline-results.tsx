@@ -51,15 +51,20 @@ export default function PipelineResults({ job: initialJob, onUpdate }: PipelineR
 
   useEffect(() => {
     if (job.status === "completed" || job.status === "failed") return;
-    const interval = setInterval(async () => {
+    let delay = 3000;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
         const res = await api.get<PipelineJob>(`/pipeline/jobs/${job.id}`);
         setJob(res.data);
         onUpdate?.(res.data);
-        if (res.data.status === "completed" || res.data.status === "failed") clearInterval(interval);
+        if (res.data.status === "completed" || res.data.status === "failed") return;
       } catch { /* silent */ }
-    }, 3000);
-    return () => clearInterval(interval);
+      delay = Math.min(delay * 1.5, 10000);
+      timer = setTimeout(poll, delay);
+    };
+    timer = setTimeout(poll, delay);
+    return () => clearTimeout(timer);
   }, [job.id, job.status, onUpdate]);
 
   const downloadBlob = async (url: string, filename: string) => {
