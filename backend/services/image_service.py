@@ -880,11 +880,94 @@ def run_image_pipeline(
         "feature_importance": feature_importance,
     }
 
+    # Save model artifacts for prediction
+    import joblib
+    model_dir = os.path.join(dataset_path, "..", "_model_artifacts")
+    os.makedirs(model_dir, exist_ok=True)
+    joblib.dump(model, os.path.join(model_dir, "model.joblib"))
+    joblib.dump(le, os.path.join(model_dir, "label_encoder.joblib"))
+    if scaler:
+        joblib.dump(scaler, os.path.join(model_dir, "scaler.joblib"))
+    if pca:
+        joblib.dump(pca, os.path.join(model_dir, "pca.joblib"))
+    # Save config for prediction
+    import json as _json
+    with open(os.path.join(model_dir, "config.json"), "w") as f:
+        _json.dump({"target_size": list(target_size), "feature_method": feature_method,
+                     "normalize": normalize, "use_pca": use_pca}, f)
+
     # Generate pipeline code and report
     result["report_code"] = _generate_pipeline_code(result, config)
     result["pipeline_report_text"] = _generate_pipeline_report(result, config)
 
     return result
+
+
+def predict_single_image(job_dir: str, image_path: str) -> Dict[str, Any]:
+    """Predict the class of a single image using a trained pipeline model."""
+    import joblib, json as _json
+
+    model_dir = os.path.join(job_dir, "_model_artifacts")
+    if not os.path.isdir(model_dir):
+        # Try parent dir
+        model_dir = os.path.join(os.path.dirname(job_dir), "_model_artifacts")
+    if not os.path.isdir(model_dir):
+        raise FileNotFoundError("No trained model found. Run pipeline first.")
+
+    model = joblib.load(os.path.join(model_dir, "model.joblib"))
+    le = joblib.load(os.path.join(model_dir, "label_encoder.joblib"))
+    scaler_path = os.path.join(model_dir, "scaler.joblib")
+    scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+    pca_path = os.path.join(model_dir, "pca.joblib")
+    pca = joblib.load(pca_path) if os.path.exists(pca_path) else None
+
+    with open(os.path.join(model_dir, "config.json")) as f:
+        cfg = _json.load(f)
+
+    target_size = tuple(cfg.get("target_size", [128, 128]))
+    feature_method = cfg.get("feature_method", "hog")
+
+    img = _load_image(image_path, target_size)
+    if img is None:
+        raise ValueError("Could not load the image. Ensure it is a valid image file.")
+
+    feat = _extract_features(img, method=feature_method)
+    X = feat.reshape(1, -1)
+
+    if scaler:
+        X = scaler.transform(X)
+    if pca:
+        X = pca.transform(X)
+
+    predicted_idx = model.predict(X)[0]
+    predicted_class = le.inverse_transform([predicted_idx])[0]
+
+    probabilities = {}
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(X)[0]
+        for i, cls in enumerate(le.classes_):
+            probabilities[cls] = round(float(probs[i]), 4)
+
+    confidence = max(probabilities.values()) if probabilities else None
+
+    # Build report
+    report_lines = [
+        f"Prediction: {predicted_class}",
+        f"Confidence: {confidence * 100:.1f}%" if confidence else "",
+    ]
+    if predicted_class.lower() in ("healthy", "normal", "benign", "good"):
+        report_lines.append("Status: The image appears healthy/normal.")
+        report_lines.append("Recommendation: Continue current care practices to maintain health.")
+    else:
+        report_lines.append(f"Status: Potential issue detected — {predicted_class}.")
+        report_lines.append("Recommendation: Consult domain experts for further assessment and treatment options.")
+
+    return {
+        "predicted_class": predicted_class,
+        "confidence": confidence,
+        "probabilities": probabilities,
+        "report": "\n".join([l for l in report_lines if l]),
+    }
 
 
 def _generate_pipeline_code(result: Dict[str, Any], config: Dict[str, Any]) -> str:

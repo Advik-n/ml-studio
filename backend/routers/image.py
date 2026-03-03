@@ -293,30 +293,36 @@ async def run_image_pipeline(
     current_user: User = Depends(require_verified_user),
     db: Session = Depends(get_db),
 ):
-    """Train image classification model."""
-    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
-    if not job:
+    """Train image classification model. Creates a new pipeline job linked to the EDA job's dataset."""
+    eda_job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not eda_job:
         raise HTTPException(404, "Job not found")
     project = db.query(Project).filter(
-        Project.id == job.project_id, Project.user_id == current_user.id
+        Project.id == eda_job.project_id, Project.user_id == current_user.id
     ).first()
     if not project:
         raise HTTPException(403, "Access denied.")
     
     dataset_path = _get_dataset_path(job_id)
     
+    # Create a separate pipeline job (don't mutate the EDA job)
+    pipeline_job_id = str(uuid.uuid4())
+    pipeline_job = ImageJob(
+        id=pipeline_job_id,
+        project_id=eda_job.project_id,
+        job_type="image_pipeline",
+        status="processing",
+    )
+    db.add(pipeline_job)
+    db.commit()
+    
     try:
-        # Update the existing job with pipeline results
-        job.status = "processing"
-        job.job_type = "image_pipeline"
-        db.commit()
-        
         result = await asyncio.to_thread(image_service.run_image_pipeline, dataset_path, config.model_dump())
         
-        job.status = "completed"
-        job.model_name = result["model_name"]
-        job.accuracy = result["accuracy"]
-        job.metrics = {
+        pipeline_job.status = "completed"
+        pipeline_job.model_name = result["model_name"]
+        pipeline_job.accuracy = result["accuracy"]
+        pipeline_job.metrics = {
             "precision": result["precision"],
             "recall": result["recall"],
             "f1_score": result["f1_score"],
@@ -334,19 +340,32 @@ async def run_image_pipeline(
             "confidence_stats": result.get("confidence_stats"),
             "feature_importance": result.get("feature_importance"),
         }
-        job.confusion_matrix = result["confusion_matrix"]
-        job.total_images = result["total_samples"]
-        job.num_classes = len(result["class_names"])
-        job.class_names = result["class_names"]
-        job.training_history = {
+        pipeline_job.confusion_matrix = result["confusion_matrix"]
+        pipeline_job.total_images = result["total_samples"]
+        pipeline_job.num_classes = len(result["class_names"])
+        pipeline_job.class_names = result["class_names"]
+        pipeline_job.training_history = {
             "report_code": result.get("report_code", ""),
             "pipeline_report_text": result.get("pipeline_report_text", ""),
+            "eda_job_id": job_id,
         }
+        # Copy dataset files dir reference so pipeline job can find the data
+        pipeline_job_dir = os.path.join(UPLOAD_DIR, pipeline_job_id)
+        os.makedirs(pipeline_job_dir, exist_ok=True)
+        eda_dataset = _find_dataset_root(os.path.join(UPLOAD_DIR, job_id))
+        link_path = os.path.join(pipeline_job_dir, "dataset")
+        if not os.path.exists(link_path):
+            os.symlink(os.path.abspath(eda_dataset), link_path)
         db.commit()
-        db.refresh(job)
+        db.refresh(pipeline_job)
         
-        return job
+        return pipeline_job
+    except HTTPException:
+        raise
     except Exception as e:
+        pipeline_job.status = "failed"
+        pipeline_job.error_message = str(e)
+        db.commit()
         logger.exception(f"Pipeline failed: {e}")
         raise HTTPException(500, f"Pipeline failed: {str(e)}")
 
@@ -694,6 +713,45 @@ async def download_meditech_code(
         raise HTTPException(400, "No MediTech code available. Run MediTech analysis first.")
     return Response(content=code, media_type="text/x-python",
                     headers={"Content-Disposition": f"attachment; filename=meditech_analysis_{job_id[:8]}.py"})
+
+
+@router.post("/jobs/{job_id}/predict")
+async def predict_image(
+    job_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_verified_user),
+    db: Session = Depends(get_db),
+):
+    """Predict the class of a single image using a trained pipeline model."""
+    job = db.query(ImageJob).filter(ImageJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    project = db.query(Project).filter(
+        Project.id == job.project_id, Project.user_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(403, "Access denied.")
+    if job.job_type != "image_pipeline" or job.status != "completed":
+        raise HTTPException(400, "Need a completed pipeline job for prediction.")
+
+    # Save temp image
+    import tempfile
+    ext = os.path.splitext(file.filename or ".jpg")[1]
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    try:
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+        job_dir = os.path.join(UPLOAD_DIR, job_id)
+        result = await asyncio.to_thread(image_service.predict_single_image, job_dir, tmp.name)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception(f"Prediction failed: {e}")
+        raise HTTPException(500, f"Prediction failed: {str(e)}")
+    finally:
+        os.unlink(tmp.name)
 
 
 def _find_dataset_root(job_dir: str) -> str:

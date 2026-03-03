@@ -29,20 +29,33 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [edaJobs, setEdaJobs] = useState<EDAJob[]>([]);
   const [pipelineJobs, setPipelineJobs] = useState<PipelineJob[]>([]);
+  const [imageJobs, setImageJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     try {
-      const [userData, projRes, edaRes, pipeRes] = await Promise.all([
+      const [userData, projRes] = await Promise.all([
         getCurrentUser(),
         api.get<Project>(`/projects/${id}`),
-        api.get<EDAJob[]>(`/eda/${id}/jobs`),
-        api.get<PipelineJob[]>(`/pipeline/${id}/jobs`),
       ]);
       setUser(userData);
-      setProject(projRes.data);
-      setEdaJobs(edaRes.data);
-      setPipelineJobs(pipeRes.data);
+      const proj = projRes.data;
+      setProject(proj);
+
+      // Fetch appropriate jobs based on project type
+      if (proj.project_type === "image") {
+        try {
+          const imgRes = await api.get(`/image/${id}/jobs`);
+          setImageJobs(Array.isArray(imgRes.data) ? imgRes.data : []);
+        } catch { /* no image jobs */ }
+      } else {
+        const [edaRes, pipeRes] = await Promise.all([
+          api.get<EDAJob[]>(`/eda/${id}/jobs`),
+          api.get<PipelineJob[]>(`/pipeline/${id}/jobs`),
+        ]);
+        setEdaJobs(edaRes.data);
+        setPipelineJobs(pipeRes.data);
+      }
     } catch {
       router.push("/dashboard");
     } finally {
@@ -225,6 +238,43 @@ export default function ProjectPage() {
                             variant="ghost"
                             onClick={() => router.push(`/projects/${id}/pipeline`)}
                           >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            </section>
+          )}
+          {/* Image Jobs */}
+          {imageJobs.length > 0 && (
+            <section className="mb-8">
+              <h2 className="text-lg font-semibold text-[var(--text)] mb-3">
+                Image Jobs ({imageJobs.length})
+              </h2>
+              <div className="space-y-2">
+                {imageJobs.slice(0, 10).map((job: any) => (
+                  <motion.div key={job.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                    <Card>
+                      <CardContent className="flex items-center justify-between p-4">
+                        <div>
+                          <p className="text-sm font-medium text-[var(--text)]">
+                            {job.job_type === "image_eda" ? "Image EDA" : `Pipeline — ${job.model_name || "Model"}`}
+                            {job.accuracy != null && ` · ${(job.accuracy * 100).toFixed(1)}%`}
+                          </p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {job.total_images ? `${job.total_images} images` : ""} {job.num_classes ? `· ${job.num_classes} classes` : ""}
+                            {job.created_at ? ` · ${formatDate(job.created_at)}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={job.status === "completed" ? "success" : job.status === "failed" ? "error" : "processing"}>
+                            {job.status}
+                          </Badge>
+                          <Button size="icon-sm" variant="ghost"
+                            onClick={() => router.push(`/projects/${id}/${job.job_type === "image_eda" ? "image-eda" : "image-pipeline"}`)}>
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
                         </div>

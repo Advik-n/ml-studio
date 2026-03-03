@@ -83,9 +83,12 @@ export default function ImageEDAPage() {
       try {
         const jobsRes = await api.get(`/image/${id}/jobs`);
         const jobsList = Array.isArray(jobsRes.data) ? jobsRes.data : [];
+        // Look for EDA jobs first, then fall back to any job with eda_report (legacy)
         const edaJobs = jobsList.filter((j: any) => j.job_type === "image_eda");
-        if (edaJobs.length > 0) {
-          const latest = edaJobs[0];
+        const legacyJobs = jobsList.filter((j: any) => j.eda_report && j.status === "completed");
+        const candidates = edaJobs.length > 0 ? edaJobs : legacyJobs;
+        if (candidates.length > 0) {
+          const latest = candidates[0];
           setJob(latest);
           if (latest.status === "completed" && latest.eda_report) setEdaResult(latest.eda_report);
         }
@@ -185,8 +188,8 @@ export default function ImageEDAPage() {
             </div>
           </div>
 
-          {/* Upload Section */}
-          {!job && (
+          {/* Upload Section — shown when no job exists, or as a compact re-upload option */}
+          {!job ? (
             <Card className="mb-6 card-hover-glow">
               <CardContent className="p-6">
                 <div className="flex flex-col items-center justify-center py-8">
@@ -217,6 +220,17 @@ export default function ImageEDAPage() {
                 </div>
               </CardContent>
             </Card>
+          ) : edaResult && (
+            <div className="mb-4 flex items-center justify-between p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <span className="text-xs text-[var(--text-muted)]">Dataset loaded • Job {job.id.slice(0, 8)}... • {edaResult.total_images} images • {edaResult.num_classes} classes</span>
+              </div>
+              <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
+                <input type="file" accept=".zip" onChange={handleUpload} className="hidden" />
+                <Upload className="h-3.5 w-3.5" /> Upload New Dataset
+              </label>
+            </div>
           )}
 
           {/* Job Status (before EDA run) */}
@@ -543,6 +557,24 @@ export default function ImageEDAPage() {
                   {/* Results */}
                   {edaResult.agritech && (
                     <>
+                      {/* Dataset Summary */}
+                      <Section title="Dataset Summary" icon={<Info className="h-4 w-4 text-green-400" />} accent="border-green-500/10">
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+                          <div><p className="text-xs text-[var(--text-muted)]">Total Images</p><p className="text-[var(--text)] font-medium text-xs">{edaResult.total_images}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Number of Classes</p><p className="text-[var(--text)] font-medium text-xs">{edaResult.num_classes}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Domain</p><p className="text-[var(--text)] font-medium text-xs">Agriculture / Crop Science</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Healthy Classes</p><p className="text-green-400 font-medium text-xs">{edaResult.agritech.severity_summary?.healthy_classes?.length || 0}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Warning Classes</p><p className="text-amber-400 font-medium text-xs">{edaResult.agritech.severity_summary?.warning_classes?.length || 0}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Critical Classes</p><p className="text-red-400 font-medium text-xs">{edaResult.agritech.severity_summary?.critical_classes?.length || 0}</p></div>
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mt-3 leading-relaxed">
+                          This dataset contains {edaResult.total_images} crop/plant images across {edaResult.num_classes} classes.
+                          The AgriTech analysis evaluates each class for disease symptoms, pest damage, and environmental stress
+                          using color profile analysis, texture irregularity detection, and pattern matching against a comprehensive
+                          knowledge base of known crop diseases and conditions.
+                        </p>
+                      </Section>
+
                       {/* Summary Cards */}
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         {[
@@ -581,21 +613,41 @@ export default function ImageEDAPage() {
                         )}
                       </Section>
 
-                      {/* Knowledge Base Matches */}
+                      {/* Knowledge Base Matches — detailed */}
                       {edaResult.agritech.knowledge_base_matches?.length > 0 && (
                         <Section title="Detection & Knowledge Base" icon={<Target className="h-4 w-4 text-green-400" />} accent="border-green-500/10">
-                          <div className="space-y-3">
+                          <p className="text-xs text-[var(--text-muted)] mb-3 leading-relaxed">
+                            The following conditions were detected by analyzing color anomalies, texture patterns, and leaf damage signatures
+                            in the dataset images. Each match is cross-referenced against a curated knowledge base of crop diseases, pests,
+                            and environmental stresses.
+                          </p>
+                          <div className="space-y-4">
                             {edaResult.agritech.knowledge_base_matches.map((match: any, i: number) => (
                               <div key={i} className="rounded-lg bg-green-500/5 border border-green-500/10 p-4">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between mb-3">
                                   <span className="text-sm font-semibold text-[var(--text)]">{match.disease || match.name}</span>
-                                  <Badge variant="processing" className="text-[10px]">{(match.confidence * 100).toFixed(0)}% match</Badge>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant={match.risk_level === 'high' ? 'error' : match.risk_level === 'medium' ? 'processing' : 'success'} className="text-[10px]">
+                                      {match.risk_level?.toUpperCase()} RISK
+                                    </Badge>
+                                  </div>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                  {match.symptoms && <div><span className="text-[var(--text-muted)]">Symptoms:</span> <span className="text-[var(--text)]">{match.symptoms}</span></div>}
-                                  {match.treatment && <div><span className="text-[var(--text-muted)]">Treatment:</span> <span className="text-green-400">{match.treatment}</span></div>}
-                                  {match.prevention && <div><span className="text-[var(--text-muted)]">Prevention:</span> <span className="text-cyan-400">{match.prevention}</span></div>}
-                                  {match.risk_level && <div><span className="text-[var(--text-muted)]">Risk:</span> <span className={match.risk_level === 'high' ? "text-red-400" : "text-amber-400"}>{match.risk_level}</span></div>}
+                                <div className="space-y-2 text-xs">
+                                  {match.symptoms && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Symptoms: </span><span className="text-[var(--text)] leading-relaxed">{match.symptoms}</span></div>
+                                  )}
+                                  {match.cause && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Causes: </span><span className="text-amber-400 leading-relaxed">{match.cause}</span></div>
+                                  )}
+                                  {match.treatment && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Treatment & Prevention: </span><span className="text-green-400 leading-relaxed">{match.treatment}</span></div>
+                                  )}
+                                  {match.color_shift && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Visual Indicator: </span><span className="text-cyan-400">{match.color_shift} color shift detected in affected regions</span></div>
+                                  )}
+                                  {match.matched_indicator && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Detection Method: </span><span className="text-purple-400">Matched via {match.matched_indicator.replace(/_/g, ' ')} analysis</span></div>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -603,25 +655,63 @@ export default function ImageEDAPage() {
                         </Section>
                       )}
 
-                      {/* Cause-Effect-Impact */}
-                      {edaResult.agritech.cause_analysis?.length > 0 && (
-                        <Section title="Cause-Effect Analysis" icon={<Activity className="h-4 w-4 text-green-400" />} accent="border-green-500/10" defaultOpen={false}>
-                          <div className="space-y-4">
-                            {edaResult.agritech.cause_analysis?.map((c: any, i: number) => (
-                              <div key={i} className="rounded-lg bg-[var(--bg)] p-3">
-                                <p className="text-xs font-medium text-[var(--text)]">Type: {c.type}</p>
-                                <p className="text-xs text-[var(--text-muted)]">Evidence: {c.evidence_count} indicators — {c.detail}</p>
+                      {/* Cause-Effect-Impact — expanded */}
+                      <Section title="Cause-Effect Analysis" icon={<Activity className="h-4 w-4 text-green-400" />} accent="border-green-500/10">
+                        <div className="space-y-4">
+                          {edaResult.agritech.cause_analysis?.length > 0 ? (
+                            edaResult.agritech.cause_analysis.map((c: any, i: number) => (
+                              <div key={i} className="rounded-lg bg-[var(--bg)] p-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Badge variant={c.type === 'disease' ? 'error' : c.type === 'pest' ? 'processing' : 'success'} className="text-[10px]">
+                                    {c.type.toUpperCase()}
+                                  </Badge>
+                                  <span className="text-xs font-medium text-[var(--text)]">{c.evidence_count} indicator(s) detected</span>
+                                </div>
+                                <p className="text-xs text-[var(--text-muted)] leading-relaxed">{c.detail}</p>
+                                {c.type === 'disease' && (
+                                  <p className="text-xs text-amber-400 mt-1.5 leading-relaxed">
+                                    Disease indicators suggest fungal or bacterial pathogens are present. Common causes include humid conditions,
+                                    poor air circulation, contaminated soil, or infected seed material. Early detection and treatment can significantly
+                                    reduce crop loss.
+                                  </p>
+                                )}
+                                {c.type === 'pest' && (
+                                  <p className="text-xs text-amber-400 mt-1.5 leading-relaxed">
+                                    Pest damage patterns indicate insect or mite activity. Affected plants may show leaf curling, stippling,
+                                    honeydew deposits, or irregular holes. Integrated Pest Management (IPM) combining biological controls
+                                    and targeted pesticides is recommended.
+                                  </p>
+                                )}
+                                {c.type === 'environmental' && (
+                                  <p className="text-xs text-amber-400 mt-1.5 leading-relaxed">
+                                    Environmental stress indicators point to abiotic factors such as water deficit, nutrient deficiency,
+                                    or temperature extremes. Addressing irrigation, soil nutrition, and microclimate management can help
+                                    restore plant health.
+                                  </p>
+                                )}
                               </div>
-                            ))}
-                            {edaResult.agritech.impact_assessment && (
-                              <div className="rounded-lg bg-amber-500/5 border border-amber-500/10 p-3">
-                                <p className="text-xs font-medium text-amber-400 mb-1">Impact Assessment</p>
-                                <p className="text-xs text-[var(--text-muted)]">Yield Loss: {edaResult.agritech.impact_assessment.estimated_yield_loss_pct?.toFixed(1)}% | Spread Risk: {edaResult.agritech.impact_assessment.spread_risk}</p>
+                            ))
+                          ) : (
+                            <p className="text-xs text-emerald-400">No significant causes of concern detected.</p>
+                          )}
+                          {edaResult.agritech.impact_assessment && (
+                            <div className="rounded-lg bg-amber-500/5 border border-amber-500/10 p-4">
+                              <p className="text-xs font-medium text-amber-400 mb-2">Impact Assessment</p>
+                              <div className="grid grid-cols-2 gap-3 text-xs mb-2">
+                                <div><span className="text-[var(--text-muted)]">Estimated Yield Loss:</span> <span className="text-red-400 font-medium">{edaResult.agritech.impact_assessment.estimated_yield_loss_pct?.toFixed(1)}%</span></div>
+                                <div><span className="text-[var(--text-muted)]">Spread Risk:</span> <span className={edaResult.agritech.impact_assessment.spread_risk === 'high' ? "text-red-400" : "text-amber-400"}>{edaResult.agritech.impact_assessment.spread_risk?.toUpperCase()}</span></div>
+                                <div><span className="text-[var(--text-muted)]">Affected Classes:</span> <span className="text-[var(--text)]">{edaResult.agritech.impact_assessment.affected_classes} / {edaResult.agritech.impact_assessment.total_classes}</span></div>
                               </div>
-                            )}
-                          </div>
-                        </Section>
-                      )}
+                              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                Based on the analysis, approximately {edaResult.agritech.impact_assessment.estimated_yield_loss_pct?.toFixed(1)}% yield
+                                loss is estimated across affected crops. {edaResult.agritech.impact_assessment.spread_risk === 'high'
+                                  ? 'The high spread risk means urgent intervention is needed to prevent further crop loss.'
+                                  : 'Monitor affected areas closely and apply targeted treatments.'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </Section>
 
                       {/* Recommendations */}
                       {edaResult.agritech.recommendations?.length > 0 && (
@@ -674,6 +764,24 @@ export default function ImageEDAPage() {
                         <p className="text-[10px] text-amber-400 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Medical Disclaimer: This analysis is for research purposes only. Not for clinical diagnosis.</p>
                       </div>
 
+                      {/* Dataset Summary */}
+                      <Section title="Dataset Summary" icon={<Info className="h-4 w-4 text-red-400" />} accent="border-red-500/10">
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+                          <div><p className="text-xs text-[var(--text-muted)]">Total Images</p><p className="text-[var(--text)] font-medium text-xs">{edaResult.total_images}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Number of Classes</p><p className="text-[var(--text)] font-medium text-xs">{edaResult.num_classes}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Domain</p><p className="text-[var(--text)] font-medium text-xs">Medical Imaging / Diagnostics</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Severity Level</p><p className={`font-medium text-xs ${edaResult.meditech.overall_severity > 60 ? "text-red-400" : edaResult.meditech.overall_severity > 30 ? "text-amber-400" : "text-green-400"}`}>{edaResult.meditech.overall_severity > 60 ? "High" : edaResult.meditech.overall_severity > 30 ? "Moderate" : "Low"}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Urgency</p><p className="text-red-400 font-medium text-xs">{edaResult.meditech.urgency_level || "N/A"}</p></div>
+                          <div><p className="text-xs text-[var(--text-muted)]">Conditions Detected</p><p className="text-purple-400 font-medium text-xs">{edaResult.meditech.knowledge_base_matches?.length || 0}</p></div>
+                        </div>
+                        <p className="text-xs text-[var(--text-muted)] mt-3 leading-relaxed">
+                          This medical imaging dataset contains {edaResult.total_images} images across {edaResult.num_classes} diagnostic categories.
+                          The MediTech analysis performs anomaly detection, tissue characterization using color semantics and GLCM texture analysis,
+                          severity scoring, and cross-references findings against a clinical knowledge base covering skin lesions, retinal conditions,
+                          radiographic findings, and other medical imaging pathologies.
+                        </p>
+                      </Section>
+
                       {/* Summary Cards */}
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         {[
@@ -712,21 +820,53 @@ export default function ImageEDAPage() {
                         )}
                       </Section>
 
-                      {/* Knowledge Base */}
+                      {/* Knowledge Base — detailed */}
                       {edaResult.meditech.knowledge_base_matches?.length > 0 && (
                         <Section title="Detection & Clinical Knowledge" icon={<Microscope className="h-4 w-4 text-red-400" />} accent="border-red-500/10">
-                          <div className="space-y-3">
+                          <p className="text-xs text-[var(--text-muted)] mb-3 leading-relaxed">
+                            The following medical conditions were identified by analyzing tissue color semantics, texture patterns (GLCM),
+                            morphological features, and anomaly detection. Each finding is cross-referenced against a clinical knowledge base
+                            of known pathologies, including their causes, risk factors, typical appearance, and recommended actions.
+                          </p>
+                          <div className="space-y-4">
                             {edaResult.meditech.knowledge_base_matches.map((match: any, i: number) => (
                               <div key={i} className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between mb-3">
                                   <span className="text-sm font-semibold text-[var(--text)]">{match.condition || match.name}</span>
-                                  <Badge variant="processing" className="text-[10px]">{(match.confidence * 100).toFixed(0)}% match</Badge>
+                                  <div className="flex items-center gap-2">
+                                    {match.urgency && (
+                                      <Badge variant={match.urgency === 'CRITICAL' ? 'error' : match.urgency === 'HIGH' ? 'error' : 'processing'} className="text-[10px]">
+                                        {match.urgency}
+                                      </Badge>
+                                    )}
+                                    <Badge variant={match.risk_level === 'HIGH' ? 'error' : match.risk_level === 'MODERATE' ? 'processing' : 'success'} className="text-[10px]">
+                                      {match.risk_level} RISK
+                                    </Badge>
+                                  </div>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                  {match.severity && <div><span className="text-[var(--text-muted)]">Severity:</span> <span className="text-red-400">{match.severity}</span></div>}
-                                  {match.urgency && <div><span className="text-[var(--text-muted)]">Urgency:</span> <span className="text-amber-400">{match.urgency}</span></div>}
-                                  {match.description && <div className="sm:col-span-2"><span className="text-[var(--text-muted)]">Details:</span> <span className="text-[var(--text)]">{match.description}</span></div>}
-                                  {match.prevention && <div className="sm:col-span-2"><span className="text-[var(--text-muted)]">Prevention:</span> <span className="text-cyan-400">{match.prevention}</span></div>}
+                                <div className="space-y-2 text-xs">
+                                  {match.description && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Description: </span><span className="text-[var(--text)] leading-relaxed">{match.description}</span></div>
+                                  )}
+                                  {match.common_causes && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Common Causes: </span><span className="text-amber-400 leading-relaxed">{Array.isArray(match.common_causes) ? match.common_causes.join(', ') : match.common_causes}</span></div>
+                                  )}
+                                  {match.typical_appearance && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Typical Appearance: </span><span className="text-cyan-400 leading-relaxed">{match.typical_appearance}</span></div>
+                                  )}
+                                  {match.matched_indicator && (
+                                    <div><span className="text-[var(--text-muted)] font-medium">Detection Method: </span><span className="text-purple-400">Identified via {match.matched_indicator.replace(/_/g, ' ')} analysis</span></div>
+                                  )}
+                                  <div className="mt-2 p-2 rounded bg-red-500/5 border border-red-500/5">
+                                    <span className="text-[var(--text-muted)] font-medium">Prevention & Management: </span>
+                                    <span className="text-green-400 leading-relaxed">
+                                      {match.risk_level === 'HIGH'
+                                        ? 'Immediate specialist consultation recommended. Regular screening and early detection are critical for managing this condition.'
+                                        : match.risk_level === 'MODERATE'
+                                        ? 'Schedule follow-up evaluation. Maintain regular monitoring and address modifiable risk factors.'
+                                        : 'Routine monitoring recommended. Maintain healthy lifestyle and regular check-ups.'}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -748,25 +888,44 @@ export default function ImageEDAPage() {
                         </Section>
                       )}
 
-                      {/* Cause-Effect */}
-                      {edaResult.meditech.cause_analysis?.length > 0 && (
-                        <Section title="Cause-Effect & Risk Analysis" icon={<Activity className="h-4 w-4 text-red-400" />} accent="border-red-500/10" defaultOpen={false}>
-                          <div className="space-y-3">
-                            {edaResult.meditech.cause_analysis.map((c: any, i: number) => (
-                              <div key={i} className="rounded-lg bg-[var(--bg)] p-3">
-                                <p className="text-xs font-medium text-[var(--text)]">Class: {c.class}</p>
-                                <p className="text-xs text-[var(--text-muted)]">Causes: {c.potential_causes?.join(", ")}</p>
+                      {/* Cause-Effect — expanded */}
+                      <Section title="Cause-Effect & Risk Analysis" icon={<Activity className="h-4 w-4 text-red-400" />} accent="border-red-500/10">
+                        <div className="space-y-3">
+                          {edaResult.meditech.cause_analysis?.length > 0 ? (
+                            edaResult.meditech.cause_analysis.map((c: any, i: number) => (
+                              <div key={i} className="rounded-lg bg-[var(--bg)] p-4">
+                                <p className="text-xs font-semibold text-[var(--text)] mb-1">Class: {c.class}</p>
+                                {c.potential_causes?.length > 0 && (
+                                  <div className="mb-2">
+                                    <span className="text-xs text-[var(--text-muted)] font-medium">Potential Causes: </span>
+                                    <span className="text-xs text-amber-400 leading-relaxed">{c.potential_causes.join(", ")}</span>
+                                  </div>
+                                )}
+                                <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                  Analysis of color profile and texture patterns in the &quot;{c.class}&quot; class suggests possible pathological findings.
+                                  Clinical correlation with patient history, laboratory results, and additional imaging studies is recommended
+                                  for definitive diagnosis.
+                                </p>
                               </div>
-                            ))}
-                            {edaResult.meditech.impact_assessment && (
-                              <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-3">
-                                <p className="text-xs font-medium text-red-400 mb-1">Impact Assessment</p>
-                                <p className="text-xs text-[var(--text-muted)]">{edaResult.meditech.impact_assessment.summary}</p>
-                              </div>
-                            )}
-                          </div>
-                        </Section>
-                      )}
+                            ))
+                          ) : (
+                            <p className="text-xs text-green-400">No significant pathological patterns detected in the current analysis.</p>
+                          )}
+                          {edaResult.meditech.impact_assessment && (
+                            <div className="rounded-lg bg-red-500/5 border border-red-500/10 p-4">
+                              <p className="text-xs font-medium text-red-400 mb-2">Clinical Impact Assessment</p>
+                              <p className="text-xs text-[var(--text-muted)] leading-relaxed">{edaResult.meditech.impact_assessment.summary}</p>
+                              <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">
+                                Based on the severity distribution and detected anomalies, {edaResult.meditech.urgency_level === 'CRITICAL'
+                                  ? 'immediate clinical attention is recommended. The findings indicate potentially serious pathology requiring urgent evaluation.'
+                                  : edaResult.meditech.urgency_level === 'HIGH'
+                                  ? 'prompt medical evaluation is advised. Schedule follow-up diagnostic studies and specialist consultation.'
+                                  : 'routine follow-up monitoring is sufficient. Continue regular screening intervals.'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </Section>
 
                       {/* Recommendations */}
                       {edaResult.meditech.recommendations?.length > 0 && (

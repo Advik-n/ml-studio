@@ -51,6 +51,10 @@ export default function ImagePipelinePage() {
   const [featureMethod, setFeatureMethod] = useState("hog");
   const [training, setTraining] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [pipelineHistory, setPipelineHistory] = useState<any[]>([]);
+  const [predictFile, setPredictFile] = useState<File | null>(null);
+  const [predicting, setPredicting] = useState(false);
+  const [prediction, setPrediction] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -63,17 +67,24 @@ export default function ImagePipelinePage() {
       const edaId = searchParams.get("edaJobId");
       if (edaId) {
         setEdaJobId(edaId);
-      } else {
-        try {
-          const jobsRes = await api.get(`/image/${id}/jobs`);
-          const jobsList = Array.isArray(jobsRes.data) ? jobsRes.data : [];
+      }
+      try {
+        const jobsRes = await api.get(`/image/${id}/jobs`);
+        const jobsList = Array.isArray(jobsRes.data) ? jobsRes.data : [];
+        // Find EDA job (proper or legacy with eda_report)
+        if (!edaId) {
           const edaJobs = jobsList.filter((j: any) => j.job_type === "image_eda" && j.status === "completed");
-          if (edaJobs.length > 0) setEdaJobId(edaJobs[0].id);
-          const pipJobs = jobsList.filter((j: any) => j.job_type === "image_pipeline" && j.status === "completed");
-          if (pipJobs.length > 0) setResult(pipJobs[0]);
-        } catch (err) {
-          console.error("Failed to fetch image jobs:", err);
+          const legacyEda = jobsList.filter((j: any) => j.eda_report && j.status === "completed");
+          const candidates = edaJobs.length > 0 ? edaJobs : legacyEda;
+          if (candidates.length > 0) setEdaJobId(candidates[0].id);
         }
+        // Load latest completed pipeline result
+        const pipJobs = jobsList.filter((j: any) => j.job_type === "image_pipeline" && j.status === "completed");
+        if (pipJobs.length > 0) setResult(pipJobs[0]);
+        // Store all pipeline jobs for history
+        setPipelineHistory(pipJobs);
+      } catch (err) {
+        console.error("Failed to fetch image jobs:", err);
       }
     } catch {
       router.push("/dashboard");
@@ -101,6 +112,23 @@ export default function ImagePipelinePage() {
       toast.error(extractApiError(err, "Training failed"));
     } finally {
       setTraining(false);
+    }
+  };
+
+  const handlePredict = async () => {
+    if (!predictFile || !result?.id) return;
+    setPredicting(true);
+    setPrediction(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", predictFile);
+      const res = await api.post(`/image/jobs/${result.id}/predict`, formData, { timeout: 60000 });
+      setPrediction(res.data);
+      toast.success("Prediction complete!");
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, "Prediction failed"));
+    } finally {
+      setPredicting(false);
     }
   };
 
@@ -558,6 +586,98 @@ export default function ImagePipelinePage() {
               )}
             </div>
           </div>
+
+          {/* ── Prediction Section ──────────────────────────────────── */}
+          {result && result.status === "completed" && (
+            <Card className="mt-6 card-hover-glow border-[var(--primary)]/20">
+              <CardContent className="p-5">
+                <h3 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
+                  <Crosshair className="h-4 w-4 text-[var(--primary)]" /> GUI Prediction
+                </h3>
+                <p className="text-xs text-[var(--text-muted)] mb-4">
+                  Upload a single image to classify it using the trained model. Get a detailed prediction report with confidence scores and recommendations.
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide block mb-1.5">Image File</label>
+                    <input type="file" accept="image/*"
+                      onChange={(e) => { setPredictFile(e.target.files?.[0] || null); setPrediction(null); }}
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] file:mr-3 file:rounded file:border-0 file:bg-[var(--primary)]/10 file:px-3 file:py-1 file:text-xs file:text-[var(--primary)]" />
+                  </div>
+                  <Button onClick={handlePredict} disabled={!predictFile || predicting} isLoading={predicting} className="btn-glow">
+                    {predicting ? <><Loader2 className="h-4 w-4 animate-spin" /> Predicting...</> : <><Crosshair className="h-4 w-4" /> Predict</>}
+                  </Button>
+                </div>
+                {predictFile && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span>Selected: {predictFile.name} ({(predictFile.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                )}
+                {prediction && (
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-3">
+                    <div className="rounded-lg bg-[var(--bg)] border border-[var(--border)] p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-[var(--text)]">Prediction Result</span>
+                        <Badge variant={prediction.confidence > 0.8 ? "success" : prediction.confidence > 0.5 ? "processing" : "error"}>
+                          {(prediction.confidence * 100).toFixed(1)}% confidence
+                        </Badge>
+                      </div>
+                      <p className="text-lg font-bold text-[var(--primary)] mb-2">{prediction.predicted_class}</p>
+                      <div className="whitespace-pre-wrap text-xs text-[var(--text-muted)] leading-relaxed bg-[var(--surface)] rounded-lg p-3 mb-3">
+                        {prediction.report}
+                      </div>
+                      {prediction.probabilities && Object.keys(prediction.probabilities).length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-[var(--text-muted)] mb-2">Class Probabilities</p>
+                          <div className="space-y-1.5">
+                            {Object.entries(prediction.probabilities)
+                              .sort(([, a]: any, [, b]: any) => b - a)
+                              .map(([cls, prob]: [string, any]) => (
+                                <div key={cls} className="flex items-center gap-2">
+                                  <span className="text-xs text-[var(--text)] w-28 truncate">{cls}</span>
+                                  <div className="flex-1 h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                                    <div className={`h-full rounded-full ${cls === prediction.predicted_class ? "bg-[var(--primary)]" : "bg-[var(--text-muted)]/30"}`}
+                                      style={{ width: `${prob * 100}%` }} />
+                                  </div>
+                                  <span className="text-xs font-mono text-[var(--text-muted)] w-14 text-right">{(prob * 100).toFixed(1)}%</span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Pipeline History ───────────────────────────────────── */}
+          {pipelineHistory.length > 1 && (
+            <Card className="mt-6 card-hover-glow">
+              <CardContent className="p-5">
+                <h3 className="text-sm font-semibold text-[var(--text)] mb-3">Previous Pipeline Runs ({pipelineHistory.length})</h3>
+                <div className="space-y-2">
+                  {pipelineHistory.map((job: any) => (
+                    <div key={job.id} className={`flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer ${
+                      result?.id === job.id ? "border-[var(--primary)] bg-[var(--primary)]/5" : "border-[var(--border)] hover:border-[var(--primary)]/30"
+                    }`} onClick={() => setResult(job)}>
+                      <div>
+                        <span className="text-xs font-medium text-[var(--text)]">{job.model_name}</span>
+                        <span className="text-xs text-[var(--text-muted)] ml-2">
+                          {job.accuracy != null ? `${(job.accuracy * 100).toFixed(1)}% acc` : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[var(--text-muted)]">{job.id.slice(0, 8)}</span>
+                        <Badge variant={job.status === "completed" ? "success" : "error"} className="text-[10px]">{job.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </main>
       </div>
     </div>
