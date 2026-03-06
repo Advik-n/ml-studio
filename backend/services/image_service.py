@@ -50,7 +50,7 @@ def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
         classes = {}
         try:
             entries = sorted(os.listdir(root))
-        except PermissionError:
+        except (PermissionError, FileNotFoundError, OSError):
             return classes
         for entry in entries:
             if _is_skip_dir(entry):
@@ -80,7 +80,7 @@ def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
                     images.append(full)
                 elif os.path.isdir(full):
                     images.extend(_collect_all_images(full, max_depth - 1))
-        except PermissionError:
+        except (PermissionError, FileNotFoundError, OSError):
             pass
         return images
 
@@ -95,7 +95,7 @@ def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
     try:
         subdirs = [d for d in sorted(os.listdir(dataset_path))
                    if os.path.isdir(os.path.join(dataset_path, d)) and not _is_skip_dir(d)]
-    except PermissionError:
+    except (PermissionError, FileNotFoundError, OSError):
         subdirs = []
 
     # 3. Check for train/test/val split structure
@@ -119,7 +119,7 @@ def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
         try:
             sub_subdirs = [d for d in os.listdir(sub_path)
                            if os.path.isdir(os.path.join(sub_path, d)) and not _is_skip_dir(d)]
-        except PermissionError:
+        except (PermissionError, FileNotFoundError, OSError):
             continue
         sub_splits = [d for d in sub_subdirs if d.lower() in SPLIT_NAMES]
         if sub_splits:
@@ -137,7 +137,7 @@ def _discover_classes(dataset_path: str) -> Dict[str, List[str]]:
         try:
             sub_subdirs = [d for d in os.listdir(sub_path)
                            if os.path.isdir(os.path.join(sub_path, d)) and not _is_skip_dir(d)]
-        except PermissionError:
+        except (PermissionError, FileNotFoundError, OSError):
             continue
         for sub2 in sub_subdirs:
             sub2_path = os.path.join(sub_path, sub2)
@@ -672,11 +672,404 @@ def _generate_eda_report(result: Dict[str, Any]) -> str:
     return report
 
 
+def _is_deep_learning_model(model_name: str) -> bool:
+    """Check if the model name is a deep learning model."""
+    return model_name.startswith("CNN_") or model_name.startswith("ViT_")
+
+
+def run_deep_learning_pipeline(dataset_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Train a CNN or Vision Transformer image classification model."""
+    try:
+        import tensorflow as tf
+        from tensorflow import keras
+    except ImportError:
+        logger.warning("TensorFlow not installed. Falling back to sklearn RandomForest.")
+        fallback_config = dict(config)
+        fallback_config["model_name"] = "RandomForest"
+        return run_image_pipeline(dataset_path, fallback_config)
+
+    target_size = tuple(config.get("target_size", [128, 128]))
+    model_name = config.get("model_name", "CNN_Simple")
+    test_split = config.get("test_split", 0.2)
+    epochs = config.get("epochs", 10)
+    batch_size = config.get("batch_size", 32)
+    learning_rate = config.get("learning_rate", 0.001)
+    use_pretrained = config.get("use_pretrained", True)
+    freeze_backbone = config.get("freeze_backbone", True)
+    optimizer_name = config.get("optimizer", "adam")
+    scheduler = config.get("scheduler", "none")
+    early_stopping = config.get("early_stopping", True)
+    patience = config.get("patience", 3)
+    data_augmentation = config.get("data_augmentation", None)
+    file_type = config.get("file_type", "image")
+
+    logger.info(f"Starting deep learning pipeline: {model_name}, epochs={epochs}, lr={learning_rate}")
+
+    # Discover classes
+    classes = _discover_classes(dataset_path)
+    if not classes:
+        raise ValueError("No images found in dataset path")
+
+    class_names = sorted(classes.keys())
+    num_classes = len(class_names)
+    logger.info(f"Found {num_classes} classes: {class_names}")
+
+    # Load images as arrays
+    images = []
+    labels = []
+    failed_loads = []
+
+    for cls_idx, cls_name in enumerate(class_names):
+        for fpath in classes[cls_name]:
+            img = _load_image(fpath, target_size)
+            if img is None:
+                failed_loads.append(fpath)
+                continue
+            images.append(img.astype(np.float32) / 255.0)
+            labels.append(cls_idx)
+
+    if len(images) < 10:
+        raise ValueError(f"Too few valid images loaded ({len(images)}). Need at least 10.")
+
+    X = np.array(images)
+    y = np.array(labels)
+    total_samples = len(X)
+
+    logger.info(f"Loaded {total_samples} images, shape: {X.shape}")
+
+    # Split
+    from sklearn.model_selection import train_test_split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_split, random_state=42, stratify=y
+    )
+
+    # Data augmentation layer
+    aug_layer = None
+    if data_augmentation or config.get("augment", False):
+        aug_config = data_augmentation or {}
+        aug_layers = [
+            keras.layers.RandomFlip(aug_config.get("flip", "horizontal")),
+            keras.layers.RandomRotation(aug_config.get("rotation", 0.1)),
+            keras.layers.RandomZoom(aug_config.get("zoom", 0.1)),
+            keras.layers.RandomContrast(aug_config.get("contrast", 0.1)),
+        ]
+        aug_layer = keras.Sequential(aug_layers, name="data_augmentation")
+        logger.info("Data augmentation enabled")
+
+    # Build model
+    input_shape = (*target_size, 3)
+    model = _build_deep_model(
+        model_name, input_shape, num_classes, use_pretrained,
+        freeze_backbone, aug_layer
+    )
+
+    # Optimizer
+    if optimizer_name.lower() == "sgd":
+        opt = keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
+    elif optimizer_name.lower() == "adamw":
+        opt = keras.optimizers.AdamW(learning_rate=learning_rate)
+    else:
+        opt = keras.optimizers.Adam(learning_rate=learning_rate)
+
+    loss_fn = "sparse_categorical_crossentropy" if num_classes > 2 else "sparse_categorical_crossentropy"
+    model.compile(optimizer=opt, loss=loss_fn, metrics=["accuracy"])
+
+    logger.info(f"Model compiled. Parameters: {model.count_params():,}")
+
+    # Callbacks
+    callbacks = []
+    if early_stopping:
+        callbacks.append(keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=patience, restore_best_weights=True, verbose=1
+        ))
+    if scheduler == "cosine":
+        total_steps = int(np.ceil(len(X_train) / batch_size)) * epochs
+        callbacks.append(keras.callbacks.LearningRateScheduler(
+            lambda epoch: learning_rate * 0.5 * (1 + np.cos(np.pi * epoch / epochs))
+        ))
+    elif scheduler == "step":
+        callbacks.append(keras.callbacks.LearningRateScheduler(
+            lambda epoch: learning_rate * (0.1 ** (epoch // max(epochs // 3, 1)))
+        ))
+
+    # Train
+    logger.info(f"Training for {epochs} epochs...")
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_test, y_test),
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=callbacks,
+        verbose=1,
+    )
+
+    # Evaluate
+    y_pred_probs = model.predict(X_test, verbose=0)
+    y_pred = np.argmax(y_pred_probs, axis=1)
+    y_train_pred_probs = model.predict(X_train, verbose=0)
+    y_train_pred = np.argmax(y_train_pred_probs, axis=1)
+
+    from sklearn.metrics import (
+        accuracy_score, precision_score, recall_score, f1_score,
+        confusion_matrix, classification_report, roc_auc_score
+    )
+
+    acc = float(accuracy_score(y_test, y_pred))
+    train_acc = float(accuracy_score(y_train, y_train_pred))
+    prec = float(precision_score(y_test, y_pred, average='weighted', zero_division=0))
+    rec = float(recall_score(y_test, y_pred, average='weighted', zero_division=0))
+    f1 = float(f1_score(y_test, y_pred, average='weighted', zero_division=0))
+    cm = confusion_matrix(y_test, y_pred).tolist()
+    report = classification_report(y_test, y_pred, target_names=class_names, output_dict=True, zero_division=0)
+
+    # ROC-AUC
+    roc_auc = None
+    try:
+        if len(class_names) == 2:
+            roc_auc = round(float(roc_auc_score(y_test, y_pred_probs[:, 1])), 4)
+        else:
+            roc_auc = round(float(roc_auc_score(y_test, y_pred_probs, multi_class='ovr', average='weighted')), 4)
+    except Exception:
+        pass
+
+    # Overfitting detection
+    overfit_gap = train_acc - acc
+    overfitting = "NONE"
+    if overfit_gap > 0.15:
+        overfitting = "SEVERE"
+    elif overfit_gap > 0.08:
+        overfitting = "MODERATE"
+    elif overfit_gap > 0.03:
+        overfitting = "MILD"
+
+    # Per-class metrics
+    per_class = {}
+    for cls_name in class_names:
+        if cls_name in report:
+            per_class[cls_name] = {
+                "precision": round(report[cls_name]["precision"], 4),
+                "recall": round(report[cls_name]["recall"], 4),
+                "f1": round(report[cls_name]["f1-score"], 4),
+                "support": int(report[cls_name]["support"]),
+            }
+
+    # Error analysis
+    misclassified_indices = np.where(y_pred != y_test)[0]
+    misclassified = []
+    for idx in misclassified_indices[:20]:
+        misclassified.append({
+            "true_class": class_names[y_test[idx]],
+            "predicted_class": class_names[y_pred[idx]],
+            "index": int(idx),
+        })
+
+    # Confidence distribution
+    max_probs = np.max(y_pred_probs, axis=1)
+    confidence_stats = {
+        "mean": round(float(np.mean(max_probs)), 4),
+        "std": round(float(np.std(max_probs)), 4),
+        "min": round(float(np.min(max_probs)), 4),
+        "max": round(float(np.max(max_probs)), 4),
+        "low_confidence_count": int(np.sum(max_probs < 0.5)),
+        "high_confidence_count": int(np.sum(max_probs > 0.9)),
+        "distribution": np.histogram(max_probs, bins=10, range=(0, 1))[0].tolist(),
+    }
+
+    # Training history
+    training_history = {
+        "epochs": list(range(1, len(history.history["loss"]) + 1)),
+        "train_loss": [round(float(v), 4) for v in history.history["loss"]],
+        "val_loss": [round(float(v), 4) for v in history.history.get("val_loss", [])],
+        "train_acc": [round(float(v), 4) for v in history.history["accuracy"]],
+        "val_acc": [round(float(v), 4) for v in history.history.get("val_accuracy", [])],
+    }
+
+    result = {
+        "accuracy": round(acc, 4),
+        "train_accuracy": round(train_acc, 4),
+        "precision": round(prec, 4),
+        "recall": round(rec, 4),
+        "f1_score": round(f1, 4),
+        "roc_auc": roc_auc,
+        "confusion_matrix": cm,
+        "class_names": class_names,
+        "per_class_metrics": per_class,
+        "total_samples": total_samples,
+        "train_samples": len(X_train),
+        "test_samples": len(X_test),
+        "failed_loads": len(failed_loads),
+        "feature_dim": int(np.prod(input_shape)),
+        "model_name": model_name,
+        "feature_method": "deep_learning",
+        "file_type": file_type,
+        "cv_scores": None,
+        "overfitting": {
+            "level": overfitting,
+            "train_acc": round(train_acc, 4),
+            "test_acc": round(acc, 4),
+            "gap": round(overfit_gap, 4),
+        },
+        "error_analysis": {
+            "total_misclassified": len(misclassified_indices),
+            "misclassified_pct": round(len(misclassified_indices) / max(len(y_test), 1) * 100, 1),
+            "samples": misclassified,
+        },
+        "confidence_stats": confidence_stats,
+        "feature_importance": None,
+        "training_history": training_history,
+        "model_params": model.count_params(),
+    }
+
+    # Save model artifacts
+    model_dir = os.path.join(dataset_path, "..", "_model_artifacts")
+    os.makedirs(model_dir, exist_ok=True)
+    model.save(os.path.join(model_dir, "model.keras"))
+    import joblib
+    from sklearn.preprocessing import LabelEncoder
+    le = LabelEncoder()
+    le.classes_ = np.array(class_names)
+    joblib.dump(le, os.path.join(model_dir, "label_encoder.joblib"))
+    import json as _json
+    with open(os.path.join(model_dir, "config.json"), "w") as f:
+        _json.dump({
+            "target_size": list(target_size), "model_name": model_name,
+            "model_type": "keras", "normalize": True,
+        }, f)
+
+    logger.info(f"Model saved. Accuracy: {acc:.4f}")
+
+    # Generate pipeline code and report
+    result["report_code"] = _generate_pipeline_code(result, config)
+    result["pipeline_report_text"] = _generate_pipeline_report(result, config)
+
+    return result
+
+
+def _build_deep_model(model_name, input_shape, num_classes, use_pretrained, freeze_backbone, aug_layer):
+    """Build a Keras model for image classification."""
+    import tensorflow as tf
+    from tensorflow import keras
+
+    inputs = keras.Input(shape=input_shape)
+    x = inputs
+
+    if aug_layer is not None:
+        x = aug_layer(x)
+
+    if model_name == "CNN_Simple":
+        x = keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+        x = keras.layers.MaxPooling2D()(x)
+        x = keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+        x = keras.layers.MaxPooling2D()(x)
+        x = keras.layers.Conv2D(128, 3, activation="relu", padding="same")(x)
+        x = keras.layers.MaxPooling2D()(x)
+        x = keras.layers.Flatten()(x)
+        x = keras.layers.Dropout(0.5)(x)
+        x = keras.layers.Dense(128, activation="relu")(x)
+
+    elif model_name == "CNN_ResNet":
+        weights = "imagenet" if use_pretrained else None
+        backbone = keras.applications.ResNet50(
+            include_top=False, weights=weights, input_shape=input_shape, pooling="avg"
+        )
+        backbone.trainable = not freeze_backbone
+        x = backbone(x)
+        x = keras.layers.Dropout(0.3)(x)
+        x = keras.layers.Dense(256, activation="relu")(x)
+
+    elif model_name == "CNN_VGG":
+        weights = "imagenet" if use_pretrained else None
+        backbone = keras.applications.VGG16(
+            include_top=False, weights=weights, input_shape=input_shape, pooling="avg"
+        )
+        backbone.trainable = not freeze_backbone
+        x = backbone(x)
+        x = keras.layers.Dropout(0.3)(x)
+        x = keras.layers.Dense(256, activation="relu")(x)
+
+    elif model_name == "CNN_MobileNet":
+        weights = "imagenet" if use_pretrained else None
+        backbone = keras.applications.MobileNetV2(
+            include_top=False, weights=weights, input_shape=input_shape, pooling="avg"
+        )
+        backbone.trainable = not freeze_backbone
+        x = backbone(x)
+        x = keras.layers.Dropout(0.3)(x)
+        x = keras.layers.Dense(256, activation="relu")(x)
+
+    elif model_name == "CNN_EfficientNet":
+        weights = "imagenet" if use_pretrained else None
+        backbone = keras.applications.EfficientNetB0(
+            include_top=False, weights=weights, input_shape=input_shape, pooling="avg"
+        )
+        backbone.trainable = not freeze_backbone
+        x = backbone(x)
+        x = keras.layers.Dropout(0.3)(x)
+        x = keras.layers.Dense(256, activation="relu")(x)
+
+    elif model_name == "ViT_Small":
+        x = _build_vit_layers(x, input_shape, num_classes)
+        outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+        return keras.Model(inputs, outputs)
+
+    else:
+        raise ValueError(f"Unknown deep learning model: {model_name}")
+
+    outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+    return keras.Model(inputs, outputs)
+
+
+def _build_vit_layers(x, input_shape, num_classes):
+    """Build Vision Transformer encoder layers using tf.keras."""
+    import tensorflow as tf
+    from tensorflow import keras
+
+    patch_size = 16
+    num_patches = (input_shape[0] // patch_size) * (input_shape[1] // patch_size)
+    projection_dim = 64
+    num_heads = 4
+    transformer_layers = 3
+    mlp_dim = 128
+
+    # Patch embedding via Conv2D
+    x = keras.layers.Conv2D(
+        projection_dim, kernel_size=patch_size, strides=patch_size, padding="valid"
+    )(x)
+    patch_shape = x.shape[1] * x.shape[2]
+    x = keras.layers.Reshape((patch_shape, projection_dim))(x)
+
+    # Learnable position embedding
+    positions = tf.range(start=0, limit=patch_shape, delta=1)
+    pos_embedding = keras.layers.Embedding(input_dim=patch_shape, output_dim=projection_dim)(positions)
+    x = x + pos_embedding
+
+    # Transformer encoder blocks
+    for _ in range(transformer_layers):
+        x1 = keras.layers.LayerNormalization(epsilon=1e-6)(x)
+        attn = keras.layers.MultiHeadAttention(
+            num_heads=num_heads, key_dim=projection_dim // num_heads
+        )(x1, x1)
+        x = x + attn
+        x2 = keras.layers.LayerNormalization(epsilon=1e-6)(x)
+        ffn = keras.layers.Dense(mlp_dim, activation="gelu")(x2)
+        ffn = keras.layers.Dense(projection_dim)(ffn)
+        x = x + ffn
+
+    x = keras.layers.LayerNormalization(epsilon=1e-6)(x)
+    x = keras.layers.GlobalAveragePooling1D()(x)
+    x = keras.layers.Dropout(0.3)(x)
+    return x
+
+
 def run_image_pipeline(
     dataset_path: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Train an image classification model with comprehensive reporting."""
+    model_name = config.get("model_name", "RandomForest")
+    if _is_deep_learning_model(model_name):
+        return run_deep_learning_pipeline(dataset_path, config)
+
     from sklearn.model_selection import train_test_split, cross_val_score
     from sklearn.preprocessing import StandardScaler, LabelEncoder
     from sklearn.decomposition import PCA
@@ -914,6 +1307,16 @@ def predict_single_image(job_dir: str, image_path: str) -> Dict[str, Any]:
     if not os.path.isdir(model_dir):
         raise FileNotFoundError("No trained model found. Run pipeline first.")
 
+    with open(os.path.join(model_dir, "config.json")) as f:
+        cfg = _json.load(f)
+
+    target_size = tuple(cfg.get("target_size", [128, 128]))
+    model_type = cfg.get("model_type", "sklearn")
+
+    if model_type == "keras":
+        return _predict_single_image_keras(model_dir, image_path, target_size, cfg)
+
+    # sklearn path
     model = joblib.load(os.path.join(model_dir, "model.joblib"))
     le = joblib.load(os.path.join(model_dir, "label_encoder.joblib"))
     scaler_path = os.path.join(model_dir, "scaler.joblib")
@@ -921,10 +1324,6 @@ def predict_single_image(job_dir: str, image_path: str) -> Dict[str, Any]:
     pca_path = os.path.join(model_dir, "pca.joblib")
     pca = joblib.load(pca_path) if os.path.exists(pca_path) else None
 
-    with open(os.path.join(model_dir, "config.json")) as f:
-        cfg = _json.load(f)
-
-    target_size = tuple(cfg.get("target_size", [128, 128]))
     feature_method = cfg.get("feature_method", "hog")
 
     img = _load_image(image_path, target_size)
@@ -950,7 +1349,6 @@ def predict_single_image(job_dir: str, image_path: str) -> Dict[str, Any]:
 
     confidence = max(probabilities.values()) if probabilities else None
 
-    # Build report
     report_lines = [
         f"Prediction: {predicted_class}",
         f"Confidence: {confidence * 100:.1f}%" if confidence else "",
@@ -970,8 +1368,62 @@ def predict_single_image(job_dir: str, image_path: str) -> Dict[str, Any]:
     }
 
 
+def _predict_single_image_keras(model_dir: str, image_path: str, target_size: tuple, cfg: dict) -> Dict[str, Any]:
+    """Predict using a saved Keras model."""
+    import joblib
+
+    try:
+        from tensorflow import keras
+    except ImportError:
+        raise RuntimeError("TensorFlow is required for prediction with this model but is not installed.")
+
+    keras_path = os.path.join(model_dir, "model.keras")
+    if not os.path.exists(keras_path):
+        raise FileNotFoundError("Keras model file not found.")
+
+    model = keras.models.load_model(keras_path)
+    le = joblib.load(os.path.join(model_dir, "label_encoder.joblib"))
+
+    img = _load_image(image_path, target_size)
+    if img is None:
+        raise ValueError("Could not load the image. Ensure it is a valid image file.")
+
+    X = np.expand_dims(img.astype(np.float32) / 255.0, axis=0)
+    probs = model.predict(X, verbose=0)[0]
+    predicted_idx = int(np.argmax(probs))
+    predicted_class = le.classes_[predicted_idx]
+
+    probabilities = {}
+    for i, cls in enumerate(le.classes_):
+        probabilities[cls] = round(float(probs[i]), 4)
+
+    confidence = round(float(probs[predicted_idx]), 4)
+
+    report_lines = [
+        f"Prediction: {predicted_class}",
+        f"Confidence: {confidence * 100:.1f}%",
+    ]
+    if predicted_class.lower() in ("healthy", "normal", "benign", "good"):
+        report_lines.append("Status: The image appears healthy/normal.")
+        report_lines.append("Recommendation: Continue current care practices to maintain health.")
+    else:
+        report_lines.append(f"Status: Potential issue detected — {predicted_class}.")
+        report_lines.append("Recommendation: Consult domain experts for further assessment and treatment options.")
+
+    return {
+        "predicted_class": predicted_class,
+        "confidence": confidence,
+        "probabilities": probabilities,
+        "report": "\n".join(report_lines),
+    }
+
+
 def _generate_pipeline_code(result: Dict[str, Any], config: Dict[str, Any]) -> str:
     """Generate a Python script that reproduces the image pipeline."""
+    model_name = result.get("model_name", "RandomForest")
+    if _is_deep_learning_model(model_name):
+        return _generate_dl_pipeline_code(result, config)
+
     class_names = result.get("class_names", [])
     cm = result.get("confusion_matrix", [])
     per_class = result.get("per_class_metrics", {})
@@ -1112,6 +1564,174 @@ print(f"\\nClassification Report:")
 print(classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
 
 print(f"Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+'''
+    return code
+
+
+def _generate_dl_pipeline_code(result: Dict[str, Any], config: Dict[str, Any]) -> str:
+    """Generate a Python script for deep learning image pipeline."""
+    model_name = result.get("model_name", "CNN_Simple")
+
+    code = f'''#!/usr/bin/env python3
+"""
+Deep Learning Image Classification Pipeline
+=============================================
+Generated by ML Studio
+Model: {model_name}
+Image Size: {config.get("target_size", [128, 128])}
+Test Split: {config.get("test_split", 0.2)}
+Epochs: {config.get("epochs", 10)}
+Accuracy: {result.get("accuracy", 0):.4f}
+"""
+
+import os
+import numpy as np
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import tensorflow as tf
+from tensorflow import keras
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+DATASET_PATH = "./your_dataset"   # Replace with your dataset path
+TARGET_SIZE = tuple({list(config.get("target_size", [128, 128]))})
+TEST_SPLIT = {config.get("test_split", 0.2)}
+EPOCHS = {config.get("epochs", 10)}
+BATCH_SIZE = {config.get("batch_size", 32)}
+LEARNING_RATE = {config.get("learning_rate", 0.001)}
+IMAGE_EXTS = {{'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.gif'}}
+
+# ── Dataset Loading ────────────────────────────────────────────────────────────
+def load_image(path, target_size=TARGET_SIZE):
+    img = Image.open(path).convert("RGB").resize(target_size)
+    return np.array(img, dtype=np.float32) / 255.0
+
+def discover_classes(root):
+    classes = {{}}
+    for entry in sorted(os.listdir(root)):
+        class_dir = os.path.join(root, entry)
+        if os.path.isdir(class_dir) and not entry.startswith('.'):
+            images = [os.path.join(class_dir, f) for f in os.listdir(class_dir)
+                      if os.path.splitext(f)[1].lower() in IMAGE_EXTS]
+            if images:
+                classes[entry] = sorted(images)
+    return classes
+
+print("Loading dataset...")
+classes = discover_classes(DATASET_PATH)
+class_names = sorted(classes.keys())
+num_classes = len(class_names)
+print(f"Found {{num_classes}} classes: {{class_names}}")
+
+images, labels = [], []
+for cls_idx, cls_name in enumerate(class_names):
+    for fpath in classes[cls_name]:
+        images.append(load_image(fpath))
+        labels.append(cls_idx)
+
+X = np.array(images)
+y = np.array(labels)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=TEST_SPLIT, random_state=42, stratify=y
+)
+print(f"Train: {{len(X_train)}}, Test: {{len(X_test)}}")
+
+# ── Model ──────────────────────────────────────────────────────────────────────
+'''
+
+    if model_name == "CNN_Simple":
+        code += '''inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = keras.layers.Conv2D(32, 3, activation="relu", padding="same")(inputs)
+x = keras.layers.MaxPooling2D()(x)
+x = keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+x = keras.layers.MaxPooling2D()(x)
+x = keras.layers.Conv2D(128, 3, activation="relu", padding="same")(x)
+x = keras.layers.MaxPooling2D()(x)
+x = keras.layers.Flatten()(x)
+x = keras.layers.Dropout(0.5)(x)
+x = keras.layers.Dense(128, activation="relu")(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+    elif model_name == "CNN_ResNet":
+        code += '''backbone = keras.applications.ResNet50(include_top=False, weights="imagenet", input_shape=(*TARGET_SIZE, 3), pooling="avg")
+backbone.trainable = False
+inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = backbone(inputs)
+x = keras.layers.Dropout(0.3)(x)
+x = keras.layers.Dense(256, activation="relu")(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+    elif model_name == "CNN_VGG":
+        code += '''backbone = keras.applications.VGG16(include_top=False, weights="imagenet", input_shape=(*TARGET_SIZE, 3), pooling="avg")
+backbone.trainable = False
+inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = backbone(inputs)
+x = keras.layers.Dropout(0.3)(x)
+x = keras.layers.Dense(256, activation="relu")(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+    elif model_name == "CNN_MobileNet":
+        code += '''backbone = keras.applications.MobileNetV2(include_top=False, weights="imagenet", input_shape=(*TARGET_SIZE, 3), pooling="avg")
+backbone.trainable = False
+inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = backbone(inputs)
+x = keras.layers.Dropout(0.3)(x)
+x = keras.layers.Dense(256, activation="relu")(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+    elif model_name == "CNN_EfficientNet":
+        code += '''backbone = keras.applications.EfficientNetB0(include_top=False, weights="imagenet", input_shape=(*TARGET_SIZE, 3), pooling="avg")
+backbone.trainable = False
+inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = backbone(inputs)
+x = keras.layers.Dropout(0.3)(x)
+x = keras.layers.Dense(256, activation="relu")(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+    elif model_name == "ViT_Small":
+        code += '''# Simple Vision Transformer
+patch_size, proj_dim, num_heads, n_layers = 16, 64, 4, 3
+inputs = keras.Input(shape=(*TARGET_SIZE, 3))
+x = keras.layers.Conv2D(proj_dim, kernel_size=patch_size, strides=patch_size, padding="valid")(inputs)
+num_patches = x.shape[1] * x.shape[2]
+x = keras.layers.Reshape((num_patches, proj_dim))(x)
+pos_emb = keras.layers.Embedding(input_dim=num_patches, output_dim=proj_dim)(tf.range(num_patches))
+x = x + pos_emb
+for _ in range(n_layers):
+    x1 = keras.layers.LayerNormalization()(x)
+    attn = keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=proj_dim // num_heads)(x1, x1)
+    x = x + attn
+    x2 = keras.layers.LayerNormalization()(x)
+    ffn = keras.layers.Dense(128, activation="gelu")(x2)
+    ffn = keras.layers.Dense(proj_dim)(ffn)
+    x = x + ffn
+x = keras.layers.LayerNormalization()(x)
+x = keras.layers.GlobalAveragePooling1D()(x)
+x = keras.layers.Dropout(0.3)(x)
+outputs = keras.layers.Dense(num_classes, activation="softmax")(x)
+model = keras.Model(inputs, outputs)
+'''
+
+    code += f'''
+model.compile(optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+              loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+
+# ── Training ───────────────────────────────────────────────────────────────────
+history = model.fit(X_train, y_train, validation_data=(X_test, y_test),
+                    epochs=EPOCHS, batch_size=BATCH_SIZE,
+                    callbacks=[keras.callbacks.EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True)])
+
+# ── Evaluation ─────────────────────────────────────────────────────────────────
+y_pred = np.argmax(model.predict(X_test), axis=1)
+print(f"\\nTest Accuracy: {{accuracy_score(y_test, y_pred):.4f}}")
+print(classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
+print("Confusion Matrix:")
 print(confusion_matrix(y_test, y_pred))
 '''
     return code

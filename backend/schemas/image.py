@@ -52,6 +52,33 @@ class ImagePipelineConfig(BaseModel):
     pca_components: int = 100
     file_type: str = "image"  # image, csv, txt, json — for future NLP processing
     hyperparams: Optional[Dict[str, Any]] = None
+    # Deep learning fields
+    epochs: int = 10
+    batch_size: int = 32
+    learning_rate: float = 0.001
+    use_pretrained: bool = True
+    freeze_backbone: bool = True
+    optimizer: str = "adam"  # adam, sgd, adamw
+    scheduler: str = "none"  # none, cosine, step
+    early_stopping: bool = True
+    patience: int = 3
+    data_augmentation: Optional[Dict[str, Any]] = None
+
+    @field_validator('model_name')
+    @classmethod
+    def validate_model_name(cls, v):
+        sklearn_models = {
+            "RandomForest", "SVM", "KNN", "LogisticRegression",
+            "GradientBoosting", "ExtraTrees", "XGBoost", "LightGBM",
+        }
+        dl_models = {
+            "CNN_Simple", "CNN_ResNet", "CNN_VGG", "CNN_MobileNet",
+            "CNN_EfficientNet", "ViT_Small",
+        }
+        allowed = sklearn_models | dl_models
+        if v not in allowed:
+            raise ValueError(f'model_name must be one of {sorted(allowed)}')
+        return v
 
     @field_validator('target_size')
     @classmethod
