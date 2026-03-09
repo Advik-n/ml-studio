@@ -14,7 +14,7 @@ import { toast } from "@/lib/toast";
 import { extractApiError } from "@/lib/api-errors";
 import type { Project, User } from "@/lib/types";
 
-const MODELS = [
+const SKLEARN_MODELS = [
   { id: "RandomForest", label: "Random Forest", desc: "Ensemble of decision trees" },
   { id: "ExtraTrees", label: "Extra Trees", desc: "Extremely randomized trees" },
   { id: "SVM", label: "Support Vector Machine", desc: "Kernel-based classifier" },
@@ -24,6 +24,21 @@ const MODELS = [
   { id: "XGBoost", label: "XGBoost", desc: "Extreme gradient boosting" },
   { id: "LightGBM", label: "LightGBM", desc: "Light gradient boosting" },
 ];
+
+const DL_MODELS = [
+  { id: "CNN_Simple", label: "Simple CNN", desc: "Lightweight CNN for fast training" },
+  { id: "CNN_ResNet", label: "ResNet-50", desc: "Deep residual network (pretrained)" },
+  { id: "CNN_VGG", label: "VGG-16", desc: "Classic deep CNN architecture" },
+  { id: "CNN_MobileNet", label: "MobileNet", desc: "Efficient mobile-optimized CNN" },
+  { id: "CNN_EfficientNet", label: "EfficientNet", desc: "State-of-the-art efficient CNN" },
+  { id: "ViT_Small", label: "Vision Transformer", desc: "Transformer-based vision model" },
+];
+
+const MODELS = [...SKLEARN_MODELS, ...DL_MODELS];
+
+function isDeepLearningModel(modelId: string) {
+  return modelId.startsWith("CNN_") || modelId.startsWith("ViT_");
+}
 
 const FEATURE_METHODS = [
   { id: "hog", label: "HOG + Color", desc: "Histogram of Oriented Gradients + color histograms" },
@@ -49,6 +64,16 @@ export default function ImagePipelinePage() {
   const [targetSize, setTargetSize] = useState<number[]>([128, 128]);
   const [testSplit, setTestSplit] = useState(0.2);
   const [featureMethod, setFeatureMethod] = useState("hog");
+  const [epochs, setEpochs] = useState(10);
+  const [batchSize, setBatchSize] = useState(32);
+  const [learningRate, setLearningRate] = useState(0.001);
+  const [optimizer, setOptimizer] = useState("adam");
+  const [scheduler, setScheduler] = useState("none");
+  const [earlyStop, setEarlyStop] = useState(true);
+  const [patience, setPatience] = useState(3);
+  const [usePretrained, setUsePretrained] = useState(true);
+  const [freezeBackbone, setFreezeBackbone] = useState(true);
+  const [dataAugmentation, setDataAugmentation] = useState(false);
   const [training, setTraining] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [pipelineHistory, setPipelineHistory] = useState<any[]>([]);
@@ -100,13 +125,26 @@ export default function ImagePipelinePage() {
     setTraining(true);
     setResult(null);
     try {
-      const res = await api.post(`/image/jobs/${edaJobId}/run-pipeline`, {
+      const body: Record<string, unknown> = {
         target_size: targetSize,
         model_name: selectedModel,
         test_split: testSplit,
         normalize: true,
         feature_method: featureMethod,
-      }, { timeout: 900000 });
+      };
+      if (isDeepLearningModel(selectedModel)) {
+        body.epochs = epochs;
+        body.batch_size = batchSize;
+        body.learning_rate = learningRate;
+        body.optimizer = optimizer;
+        body.scheduler = scheduler;
+        body.early_stopping = earlyStop;
+        body.patience = patience;
+        body.use_pretrained = usePretrained;
+        body.freeze_backbone = freezeBackbone;
+        body.data_augmentation = dataAugmentation ? { rotation: 0.1, flip: "horizontal", zoom: 0.1, contrast: 0.1 } : null;
+      }
+      const res = await api.post(`/image/jobs/${edaJobId}/run-pipeline`, body, { timeout: 900000 });
       setResult(res.data);
     } catch (err: unknown) {
       toast.error(extractApiError(err, "Training failed"));
@@ -197,14 +235,30 @@ export default function ImagePipelinePage() {
                   <Card className="card-hover-glow">
                     <CardContent className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--text)] mb-3">Select Model</h3>
-                      <div className="space-y-2">
-                        {MODELS.map(m => (
+                      <p className="text-xs text-[var(--text-muted)] mb-2 font-medium uppercase tracking-wide">Traditional ML</p>
+                      <div className="space-y-2 mb-4">
+                        {SKLEARN_MODELS.map(m => (
                           <motion.button key={m.id} whileHover={{ x: 3 }} whileTap={{ scale: 0.98 }}
                             onClick={() => setSelectedModel(m.id)}
                             className={`w-full text-left rounded-lg border p-3 transition-all ${
                               selectedModel === m.id
                                 ? "border-[var(--primary)] bg-[var(--primary)]/10 shadow-sm shadow-[var(--primary)]/10"
                                 : "border-[var(--border)] hover:border-[var(--primary)]/30"
+                            }`}>
+                            <p className="text-sm font-medium text-[var(--text)]">{m.label}</p>
+                            <p className="text-xs text-[var(--text-muted)]">{m.desc}</p>
+                          </motion.button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-[var(--text-muted)] mb-2 font-medium uppercase tracking-wide">Deep Learning</p>
+                      <div className="space-y-2">
+                        {DL_MODELS.map(m => (
+                          <motion.button key={m.id} whileHover={{ x: 3 }} whileTap={{ scale: 0.98 }}
+                            onClick={() => setSelectedModel(m.id)}
+                            className={`w-full text-left rounded-lg border p-3 transition-all ${
+                              selectedModel === m.id
+                                ? "border-purple-500 bg-purple-500/10 shadow-sm shadow-purple-500/10"
+                                : "border-[var(--border)] hover:border-purple-500/30"
                             }`}>
                             <p className="text-sm font-medium text-[var(--text)]">{m.label}</p>
                             <p className="text-xs text-[var(--text-muted)]">{m.desc}</p>
@@ -247,7 +301,8 @@ export default function ImagePipelinePage() {
                     </CardContent>
                   </Card>
 
-                  {/* Feature Extraction */}
+                  {/* Feature Extraction — sklearn models only */}
+                  {!isDeepLearningModel(selectedModel) && (
                   <Card className="card-hover-glow">
                     <CardContent className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
@@ -269,6 +324,130 @@ export default function ImagePipelinePage() {
                       </div>
                     </CardContent>
                   </Card>
+                  )}
+
+                  {/* Deep Learning Settings — DL models only */}
+                  {isDeepLearningModel(selectedModel) && (
+                  <Card className="card-hover-glow border-purple-500/20">
+                    <CardContent className="p-5 space-y-4">
+                      <h3 className="text-sm font-semibold text-[var(--text)] flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-purple-400" /> Deep Learning Settings
+                      </h3>
+
+                      {/* Epochs */}
+                      <div>
+                        <label className="text-xs text-[var(--text-muted)] mb-1 block">Epochs</label>
+                        <div className="flex items-center gap-3">
+                          <input type="range" min="1" max="100" step="1"
+                            value={epochs} onChange={e => setEpochs(parseInt(e.target.value))}
+                            className="flex-1 accent-purple-500" />
+                          <span className="text-sm font-mono text-[var(--text-muted)] w-8">{epochs}</span>
+                        </div>
+                      </div>
+
+                      {/* Batch Size */}
+                      <div>
+                        <label className="text-xs text-[var(--text-muted)] mb-1 block">Batch Size</label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {[8, 16, 32, 64].map(bs => (
+                            <button key={bs}
+                              onClick={() => setBatchSize(bs)}
+                              className={`rounded-lg border p-1.5 text-xs font-mono transition-all ${
+                                batchSize === bs
+                                  ? "border-purple-500 bg-purple-500/10 text-[var(--text)]"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-500/30"
+                              }`}>{bs}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Learning Rate */}
+                      <div>
+                        <label className="text-xs text-[var(--text-muted)] mb-1 block">Learning Rate</label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {[0.0001, 0.0005, 0.001, 0.01].map(lr => (
+                            <button key={lr}
+                              onClick={() => setLearningRate(lr)}
+                              className={`rounded-lg border p-1.5 text-xs font-mono transition-all ${
+                                learningRate === lr
+                                  ? "border-purple-500 bg-purple-500/10 text-[var(--text)]"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-500/30"
+                              }`}>{lr}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Optimizer */}
+                      <div>
+                        <label className="text-xs text-[var(--text-muted)] mb-1 block">Optimizer</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[{id:"adam",label:"Adam"},{id:"adamw",label:"AdamW"},{id:"sgd",label:"SGD"}].map(o => (
+                            <button key={o.id}
+                              onClick={() => setOptimizer(o.id)}
+                              className={`rounded-lg border p-1.5 text-xs transition-all ${
+                                optimizer === o.id
+                                  ? "border-purple-500 bg-purple-500/10 text-[var(--text)]"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-500/30"
+                              }`}>{o.label}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* LR Scheduler */}
+                      <div>
+                        <label className="text-xs text-[var(--text-muted)] mb-1 block">LR Scheduler</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[{id:"none",label:"None"},{id:"cosine",label:"Cosine"},{id:"step",label:"Step"}].map(s => (
+                            <button key={s.id}
+                              onClick={() => setScheduler(s.id)}
+                              className={`rounded-lg border p-1.5 text-xs transition-all ${
+                                scheduler === s.id
+                                  ? "border-purple-500 bg-purple-500/10 text-[var(--text)]"
+                                  : "border-[var(--border)] text-[var(--text-muted)] hover:border-purple-500/30"
+                              }`}>{s.label}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Toggles */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={usePretrained} onChange={e => setUsePretrained(e.target.checked)}
+                            className="rounded accent-purple-500" />
+                          <span className="text-xs text-[var(--text)]">Pretrained weights</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={freezeBackbone} onChange={e => setFreezeBackbone(e.target.checked)}
+                            className="rounded accent-purple-500" />
+                          <span className="text-xs text-[var(--text)]">Freeze backbone</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={earlyStop} onChange={e => setEarlyStop(e.target.checked)}
+                            className="rounded accent-purple-500" />
+                          <span className="text-xs text-[var(--text)]">Early stopping</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={dataAugmentation} onChange={e => setDataAugmentation(e.target.checked)}
+                            className="rounded accent-purple-500" />
+                          <span className="text-xs text-[var(--text)]">Data augmentation</span>
+                        </label>
+                      </div>
+
+                      {/* Early stopping patience */}
+                      {earlyStop && (
+                        <div>
+                          <label className="text-xs text-[var(--text-muted)] mb-1 block">Early Stop Patience</label>
+                          <div className="flex items-center gap-3">
+                            <input type="range" min="1" max="10" step="1"
+                              value={patience} onChange={e => setPatience(parseInt(e.target.value))}
+                              className="flex-1 accent-purple-500" />
+                            <span className="text-sm font-mono text-[var(--text-muted)] w-8">{patience}</span>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                  )}
 
                   {/* Train Button */}
                   <Button onClick={handleTrain} isLoading={training} className="w-full btn-glow" disabled={training}>

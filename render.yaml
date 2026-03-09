@@ -1,0 +1,35 @@
+# ──────────────────────────────────────────────────────────────────────
+# Render Blueprint — ML Studio Backend
+# Deploy: Connect GitHub repo → Render auto-detects this file
+# ──────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: ml-studio-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # Set manually — Supabase PostgreSQL connection string
+      - key: SECRET_KEY
+        generateValue: true
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: CORS_ORIGINS
+        sync: false  # Set to your Vercel frontend URL
+      - key: FRONTEND_URL
+        sync: false  # Set to your Vercel frontend URL
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "100"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: PORT
+        value: "8080"
+    disk:
+      name: ml-studio-uploads
+      mountPath: /data
+      sizeGB: 1

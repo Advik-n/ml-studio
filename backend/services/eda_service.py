@@ -70,8 +70,12 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
     _create_word_doc(df, stats_dict, findings, docx_path)
 
     cleaned_csv_path = os.path.join(output_folder, "cleaned_data.csv")
-    cleaned_df = _clean_dataframe(df)
+    cleaned_df = _clean_dataframe(df, stats_dict)
     cleaned_df.to_csv(cleaned_csv_path, index=False)
+
+    # Save pipeline config as JSON
+    pipeline_config_path = os.path.join(output_folder, "pipeline_config.json")
+    _save_pipeline_config(stats_dict, cleaned_df, pipeline_config_path)
 
     # Always bundle key artifacts into a zip for easy download
     zip_path = _zip_artifacts(
@@ -80,6 +84,7 @@ async def generate_eda(file_path: str, project_folder: str, job_id: str) -> Dict
             "eda_report.ipynb": notebook_path,
             "eda_report.docx": docx_path,
             "cleaned_data.csv": cleaned_csv_path,
+            "pipeline_config.json": pipeline_config_path,
             os.path.basename(dest_file): dest_file,
         },
     )
@@ -109,6 +114,7 @@ def _detect_file_format(filepath: str):
         ".json": pd.read_json,
         ".parquet": pd.read_parquet,
         ".data": lambda p: pd.read_csv(p, header=None, sep=None, engine="python"),
+        ".file": lambda p: pd.read_csv(p, sep=None, engine="python"),
     }
     return mapping.get(ext, lambda p: pd.read_csv(p, sep=None, engine="python"))
 
@@ -132,6 +138,7 @@ def _read_file(filepath: str) -> pd.DataFrame:
 
 def _analyze_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
     """Compute a comprehensive statistics dictionary for *df*."""
+    rows, cols = df.shape
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
@@ -176,8 +183,200 @@ def _analyze_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
     # Date column detection
     date_cols: List[str] = []
     for col in df.columns:
-        if "date" in col.lower() or "time" in col.lower() or "year" in col.lower():
+        col_str = str(col).lower()
+        if "date" in col_str or "time" in col_str or "year" in col_str:
             date_cols.append(col)
+
+    # ---- Feature Engineering Analysis ----
+    feature_engineering: Dict[str, Any] = {}
+
+    # Interaction candidates: pairs with moderate-to-high correlation
+    interaction_candidates: List[Tuple[str, str]] = []
+    if len(num_cols) >= 2 and corr_matrix is not None:
+        for c1, c2, corr_val in top_correlations:
+            if 0.3 < abs(corr_val) < 0.95:
+                interaction_candidates.append((c1, c2))
+    feature_engineering["interaction_candidates"] = interaction_candidates[:5]
+
+    # Date decomposition candidates
+    date_decomp_cols: List[str] = []
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            date_decomp_cols.append(col)
+        elif df[col].dtype == object:
+            sample = df[col].dropna().head(20)
+            if len(sample) > 0:
+                try:
+                    pd.to_datetime(sample)
+                    date_decomp_cols.append(col)
+                except (ValueError, TypeError):
+                    pass
+    feature_engineering["date_decomp_cols"] = date_decomp_cols
+
+    # Binning candidates: numeric columns with high cardinality
+    binning_candidates: List[str] = []
+    for col in num_cols:
+        nunique = df[col].nunique()
+        if nunique > 20 and not str(col).lower().endswith("id"):
+            binning_candidates.append(col)
+    feature_engineering["binning_candidates"] = binning_candidates[:8]
+
+    # Log-transform candidates: positively skewed columns
+    log_candidates: List[str] = []
+    for col in num_cols:
+        if col in skewness and skewness[col] > 1.0 and (df[col] > 0).all():
+            log_candidates.append(col)
+    feature_engineering["log_candidates"] = log_candidates
+
+    # ---- Aggregation / GroupBy Analysis ----
+    aggregation_analysis: Dict[str, Any] = {}
+
+    # Identify good groupby columns (categorical with 2-20 unique values)
+    groupby_cols: List[str] = []
+    for col in cat_cols:
+        nunique = df[col].nunique()
+        if 2 <= nunique <= 20:
+            groupby_cols.append(col)
+    aggregation_analysis["groupby_cols"] = groupby_cols[:5]
+
+    # Compute groupby summaries for top groupby cols
+    groupby_summaries: Dict[str, Dict] = {}
+    for grp_col in groupby_cols[:3]:
+        if num_cols:
+            agg_cols = num_cols[:5]
+            try:
+                summary = df.groupby(grp_col)[agg_cols].agg(["mean", "median", "std", "count"]).round(3)
+                groupby_summaries[grp_col] = {
+                    "agg_columns": agg_cols,
+                    "n_groups": df[grp_col].nunique(),
+                    "group_sizes": df[grp_col].value_counts().to_dict(),
+                }
+            except Exception:
+                pass
+    aggregation_analysis["groupby_summaries"] = groupby_summaries
+
+    # ---- Trend Analysis ----
+    trend_analysis: Dict[str, Any] = {}
+    trend_cols_detected: List[str] = []
+    for col in date_cols + date_decomp_cols:
+        try:
+            dt_series = pd.to_datetime(df[col], errors="coerce")
+            valid_count = dt_series.notna().sum()
+            if valid_count > 10:
+                trend_cols_detected.append(col)
+        except Exception:
+            pass
+    trend_analysis["time_columns"] = list(set(trend_cols_detected))
+
+    # Detect monotonic trends in numeric columns
+    monotonic_trends: Dict[str, str] = {}
+    for col in num_cols[:10]:
+        try:
+            s = df[col].dropna()
+            if len(s) >= 10:
+                # Use Spearman correlation with index as proxy for trend
+                from scipy.stats import spearmanr
+                corr_coef, pval = spearmanr(range(len(s)), s)
+                if pval < 0.05:
+                    if corr_coef > 0.3:
+                        monotonic_trends[col] = "increasing"
+                    elif corr_coef < -0.3:
+                        monotonic_trends[col] = "decreasing"
+        except Exception:
+            pass
+    trend_analysis["monotonic_trends"] = monotonic_trends
+
+    # ---- Pipeline Recommendations ----
+    pipeline_recommendations: Dict[str, Any] = {}
+
+    # Determine likely task type
+    potential_target = None
+    if cat_cols:
+        # Last column is often the target
+        last_col = df.columns[-1]
+        if last_col in cat_cols and df[last_col].nunique() <= 20:
+            potential_target = last_col
+            pipeline_recommendations["suggested_task"] = "classification"
+            pipeline_recommendations["suggested_target"] = last_col
+            n_classes = df[last_col].nunique()
+            pipeline_recommendations["n_classes"] = n_classes
+
+            # Check class imbalance
+            class_dist = df[last_col].value_counts(normalize=True)
+            min_ratio = class_dist.min()
+            pipeline_recommendations["class_imbalance"] = min_ratio < 0.1
+            if n_classes == 2:
+                pipeline_recommendations["suggested_models"] = ["RandomForest", "XGBoost", "LogisticRegression"]
+                pipeline_recommendations["suggested_metric"] = "roc_auc" if min_ratio < 0.1 else "accuracy"
+            else:
+                pipeline_recommendations["suggested_models"] = ["RandomForest", "XGBoost", "GradientBoosting"]
+                pipeline_recommendations["suggested_metric"] = "f1_weighted"
+        elif last_col in num_cols:
+            potential_target = last_col
+            pipeline_recommendations["suggested_task"] = "regression"
+            pipeline_recommendations["suggested_target"] = last_col
+            pipeline_recommendations["suggested_models"] = ["RandomForestRegressor", "XGBoostRegressor", "GradientBoostingRegressor"]
+            pipeline_recommendations["suggested_metric"] = "r2"
+    elif num_cols:
+        last_col = df.columns[-1]
+        if last_col in num_cols:
+            nunique = df[last_col].nunique()
+            if nunique <= 15:
+                pipeline_recommendations["suggested_task"] = "classification"
+                pipeline_recommendations["suggested_target"] = last_col
+                pipeline_recommendations["suggested_models"] = ["RandomForest", "XGBoost", "LogisticRegression"]
+                pipeline_recommendations["suggested_metric"] = "f1_weighted"
+            else:
+                pipeline_recommendations["suggested_task"] = "regression"
+                pipeline_recommendations["suggested_target"] = last_col
+                pipeline_recommendations["suggested_models"] = ["RandomForestRegressor", "XGBoostRegressor", "GradientBoostingRegressor"]
+                pipeline_recommendations["suggested_metric"] = "r2"
+
+    if not pipeline_recommendations.get("suggested_task") and len(num_cols) >= 3:
+        pipeline_recommendations["suggested_task"] = "clustering"
+        pipeline_recommendations["suggested_models"] = ["KMeans", "DBSCAN", "GaussianMixture"]
+        pipeline_recommendations["suggested_metric"] = "silhouette_score"
+
+    # Imputer recommendation
+    total_missing = sum(null_counts.values())
+    missing_pct = (total_missing / (rows * cols)) * 100 if rows * cols > 0 else 0
+    if missing_pct == 0:
+        pipeline_recommendations["suggested_imputer"] = "none"
+    elif missing_pct < 5:
+        pipeline_recommendations["suggested_imputer"] = "SimpleImputer(strategy='median')"
+    elif missing_pct < 15:
+        pipeline_recommendations["suggested_imputer"] = "KNNImputer(n_neighbors=5)"
+    else:
+        pipeline_recommendations["suggested_imputer"] = "IterativeImputer(max_iter=10)"
+
+    # Scaler recommendation
+    highly_skewed_count = sum(1 for s in skewness.values() if abs(s) > 1)
+    outlier_total = sum(outlier_counts.values())
+    if outlier_total > rows * 0.05 * len(num_cols):
+        pipeline_recommendations["suggested_scaler"] = "RobustScaler"
+    elif highly_skewed_count > len(num_cols) * 0.5:
+        pipeline_recommendations["suggested_scaler"] = "RobustScaler"
+    else:
+        pipeline_recommendations["suggested_scaler"] = "StandardScaler"
+
+    # Encoder recommendation
+    high_card_cats = [c for c in cat_cols if df[c].nunique() > 15]
+    if high_card_cats:
+        pipeline_recommendations["suggested_encoder"] = "OrdinalEncoder (high cardinality detected)"
+    elif cat_cols:
+        pipeline_recommendations["suggested_encoder"] = "OneHotEncoder"
+    else:
+        pipeline_recommendations["suggested_encoder"] = "none"
+
+    # Transformers list
+    transformers: List[str] = []
+    if pipeline_recommendations.get("suggested_scaler"):
+        transformers.append(pipeline_recommendations["suggested_scaler"])
+    if cat_cols:
+        transformers.append(pipeline_recommendations.get("suggested_encoder", "OneHotEncoder"))
+    if pipeline_recommendations.get("suggested_imputer") != "none":
+        transformers.append("SimpleImputer")
+    pipeline_recommendations["suggested_transformers"] = transformers
 
     return {
         "shape": df.shape,
@@ -192,6 +391,10 @@ def _analyze_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
         "outlier_counts": outlier_counts,
         "date_cols": date_cols,
         "duplicates": int(df.duplicated().sum()),
+        "feature_engineering": feature_engineering,
+        "aggregation_analysis": aggregation_analysis,
+        "trend_analysis": trend_analysis,
+        "pipeline_recommendations": pipeline_recommendations,
     }
 
 
@@ -235,6 +438,42 @@ def _generate_findings(df: pd.DataFrame, stats: Dict[str, Any]) -> List[str]:
     # Date/time columns
     if stats["date_cols"]:
         findings.append(f"Potential time-series column(s) detected: {', '.join(stats['date_cols'])}.")
+
+    # Feature engineering findings
+    fe = stats.get("feature_engineering", {})
+    if fe.get("interaction_candidates"):
+        pairs = ", ".join(f"{c1}×{c2}" for c1, c2 in fe["interaction_candidates"][:3])
+        findings.append(f"Suggested interaction features: {pairs}.")
+    if fe.get("log_candidates"):
+        findings.append(f"Log-transform candidates (positively skewed, all positive): {', '.join(fe['log_candidates'][:5])}.")
+    if fe.get("date_decomp_cols"):
+        findings.append(f"Date columns suitable for decomposition (year/month/day/dow): {', '.join(fe['date_decomp_cols'])}.")
+    if fe.get("binning_candidates"):
+        findings.append(f"Binning candidates (high-cardinality numeric): {', '.join(fe['binning_candidates'][:5])}.")
+
+    # Trend analysis findings
+    trend = stats.get("trend_analysis", {})
+    if trend.get("monotonic_trends"):
+        trend_list = ", ".join(f"{c} ({d})" for c, d in list(trend["monotonic_trends"].items())[:5])
+        findings.append(f"Monotonic trends detected: {trend_list}.")
+
+    # Aggregation findings
+    agg = stats.get("aggregation_analysis", {})
+    if agg.get("groupby_cols"):
+        findings.append(f"Suitable groupby columns for aggregation: {', '.join(agg['groupby_cols'])}.")
+
+    # Pipeline recommendation findings
+    pr = stats.get("pipeline_recommendations", {})
+    if pr.get("suggested_task"):
+        findings.append(
+            f"Recommended pipeline: task={pr['suggested_task']}, "
+            f"models={pr.get('suggested_models', [])}, "
+            f"metric={pr.get('suggested_metric', 'N/A')}, "
+            f"imputer={pr.get('suggested_imputer', 'N/A')}, "
+            f"scaler={pr.get('suggested_scaler', 'N/A')}."
+        )
+    if pr.get("class_imbalance"):
+        findings.append("⚠ Class imbalance detected — consider SMOTE or stratified sampling.")
 
     return findings
 
@@ -537,13 +776,249 @@ def _build_notebook(
         "cleaned.head()"
     ))
 
-    # ---- Section 10: Save Cleaned Dataset ----
-    cells.append(new_markdown_cell("## Section 10 — Save Cleaned Dataset"))
+    # ---- Section 10: Feature Engineering ----
+    fe = stats.get("feature_engineering", {})
+    cells.append(new_markdown_cell("## Section 10 — Feature Engineering"))
+    fe_code = (
+        "# --- Feature Engineering ---\n"
+        "import warnings\n"
+        "warnings.filterwarnings('ignore')\n"
+        "fe_df = cleaned.copy()\n"
+        "num_cols = fe_df.select_dtypes(include=np.number).columns.tolist()\n"
+        "cat_cols = fe_df.select_dtypes(include=['object','category']).columns.tolist()\n"
+        "new_features = []\n\n"
+    )
+
+    # Interaction features
+    interaction_candidates = fe.get("interaction_candidates", [])
+    if interaction_candidates:
+        fe_code += "# Interaction features (product of correlated pairs)\n"
+        for c1, c2 in interaction_candidates[:5]:
+            safe_name = f"{c1}_x_{c2}"
+            fe_code += f"if '{c1}' in fe_df.columns and '{c2}' in fe_df.columns:\n"
+            fe_code += f"    fe_df['{safe_name}'] = fe_df['{c1}'] * fe_df['{c2}']\n"
+            fe_code += f"    new_features.append('{safe_name}')\n"
+        fe_code += "\n"
+
+    # Log transform candidates
+    log_candidates = fe.get("log_candidates", [])
+    if log_candidates:
+        fe_code += "# Log-transform for skewed positive features\n"
+        for col in log_candidates[:5]:
+            fe_code += f"if '{col}' in fe_df.columns and (fe_df['{col}'] > 0).all():\n"
+            fe_code += f"    fe_df['{col}_log'] = np.log1p(fe_df['{col}'])\n"
+            fe_code += f"    new_features.append('{col}_log')\n"
+        fe_code += "\n"
+
+    # Date decomposition
+    date_decomp_cols = fe.get("date_decomp_cols", [])
+    if date_decomp_cols:
+        fe_code += "# Date decomposition\n"
+        for col in date_decomp_cols[:3]:
+            fe_code += f"try:\n"
+            fe_code += f"    fe_df['{col}'] = pd.to_datetime(fe_df['{col}'], errors='coerce')\n"
+            fe_code += f"    fe_df['{col}_year'] = fe_df['{col}'].dt.year\n"
+            fe_code += f"    fe_df['{col}_month'] = fe_df['{col}'].dt.month\n"
+            fe_code += f"    fe_df['{col}_dayofweek'] = fe_df['{col}'].dt.dayofweek\n"
+            fe_code += f"    fe_df['{col}_quarter'] = fe_df['{col}'].dt.quarter\n"
+            fe_code += f"    new_features.extend(['{col}_year', '{col}_month', '{col}_dayofweek', '{col}_quarter'])\n"
+            fe_code += f"except Exception:\n"
+            fe_code += f"    pass\n"
+        fe_code += "\n"
+
+    # Binning candidates
+    binning_candidates = fe.get("binning_candidates", [])
+    if binning_candidates:
+        fe_code += "# Quantile binning for high-cardinality numeric features\n"
+        for col in binning_candidates[:5]:
+            fe_code += f"if '{col}' in fe_df.columns:\n"
+            fe_code += f"    try:\n"
+            fe_code += f"        fe_df['{col}_binned'] = pd.qcut(fe_df['{col}'], q=5, labels=['very_low','low','mid','high','very_high'], duplicates='drop')\n"
+            fe_code += f"        new_features.append('{col}_binned')\n"
+            fe_code += f"    except Exception:\n"
+            fe_code += f"        pass\n"
+        fe_code += "\n"
+
+    fe_code += (
+        "print(f'New features created: {len(new_features)}')\n"
+        "if new_features:\n"
+        "    print('Features:', new_features)\n"
+        "    display(fe_df[new_features].describe())\n"
+        "cleaned = fe_df  # Update cleaned with engineered features\n"
+    )
+    cells.append(new_code_cell(fe_code))
+
+    # ---- Section 11: Trend Analysis & Aggregations ----
+    cells.append(new_markdown_cell("## Section 11 — Trend Analysis & Aggregations"))
+
+    # Aggregation / GroupBy code
+    agg = stats.get("aggregation_analysis", {})
+    groupby_cols = agg.get("groupby_cols", [])
+    trend = stats.get("trend_analysis", {})
+
+    agg_code = (
+        "# --- Aggregation & GroupBy Analysis ---\n"
+        "num_cols = cleaned.select_dtypes(include=np.number).columns.tolist()\n"
+        "cat_cols = cleaned.select_dtypes(include=['object','category']).columns.tolist()\n\n"
+    )
+
+    if groupby_cols:
+        for grp_col in groupby_cols[:3]:
+            agg_code += f"# GroupBy: {grp_col}\n"
+            agg_code += f"if '{grp_col}' in cleaned.columns:\n"
+            agg_code += f"    agg_cols = [c for c in num_cols if c != '{grp_col}'][:5]\n"
+            agg_code += f"    if agg_cols:\n"
+            agg_code += f"        grp_stats = cleaned.groupby('{grp_col}')[agg_cols].agg(['mean', 'median', 'std', 'min', 'max'])\n"
+            agg_code += f"        print(f'\\n=== Aggregation by {grp_col} ===')\n"
+            agg_code += f"        display(grp_stats.round(3))\n\n"
+            agg_code += f"        # Bar plot of mean values per group\n"
+            agg_code += f"        plot_cols = agg_cols[:3]\n"
+            agg_code += f"        means = cleaned.groupby('{grp_col}')[plot_cols].mean()\n"
+            agg_code += f"        fig, axes = plt.subplots(1, len(plot_cols), figsize=(5*len(plot_cols), 4))\n"
+            agg_code += f"        if len(plot_cols) == 1: axes = [axes]\n"
+            agg_code += f"        for i, col in enumerate(plot_cols):\n"
+            agg_code += f"            means[col].plot(kind='bar', ax=axes[i], color='steelblue', edgecolor='white')\n"
+            agg_code += f"            axes[i].set_title(f'Mean {{col}} by {grp_col}', fontsize=11)\n"
+            agg_code += f"            axes[i].set_xlabel('{grp_col}')\n"
+            agg_code += f"            axes[i].tick_params(axis='x', rotation=45)\n"
+            agg_code += f"        plt.tight_layout()\n"
+            agg_code += f"        plt.savefig(os.path.join(r'{output_folder}', 'groupby_{grp_col}.png'), dpi=100, bbox_inches='tight')\n"
+            agg_code += f"        plt.show(); plt.close()\n\n"
+    else:
+        agg_code += "# No suitable categorical columns for groupby (need 2-20 unique values)\n"
+        agg_code += "print('No categorical columns suitable for groupby aggregation.')\n\n"
+
+    # Trend analysis
+    agg_code += "# --- Trend Analysis ---\n"
+    time_cols = trend.get("time_columns", [])
+    monotonic = trend.get("monotonic_trends", {})
+
+    if time_cols:
+        for tcol in time_cols[:2]:
+            agg_code += f"try:\n"
+            agg_code += f"    ts_col = pd.to_datetime(cleaned['{tcol}'], errors='coerce')\n"
+            agg_code += f"    valid_mask = ts_col.notna()\n"
+            agg_code += f"    if valid_mask.sum() > 10:\n"
+            agg_code += f"        ts_df = cleaned[valid_mask].copy()\n"
+            agg_code += f"        ts_df['{tcol}'] = ts_col[valid_mask]\n"
+            agg_code += f"        ts_df = ts_df.sort_values('{tcol}')\n"
+            agg_code += f"        ts_num = ts_df.select_dtypes(include=np.number).columns.tolist()[:3]\n"
+            agg_code += f"        if ts_num:\n"
+            agg_code += f"            fig, axes = plt.subplots(len(ts_num), 1, figsize=(12, 4*len(ts_num)))\n"
+            agg_code += f"            if len(ts_num) == 1: axes = [axes]\n"
+            agg_code += f"            for i, col in enumerate(ts_num):\n"
+            agg_code += f"                axes[i].plot(ts_df['{tcol}'], ts_df[col], linewidth=0.8, alpha=0.6, label='Raw')\n"
+            agg_code += f"                # Rolling mean for trend\n"
+            agg_code += f"                window = max(5, len(ts_df) // 20)\n"
+            agg_code += f"                rolling = ts_df[col].rolling(window=window, center=True).mean()\n"
+            agg_code += f"                axes[i].plot(ts_df['{tcol}'], rolling, linewidth=2, color='red', label=f'Rolling Mean (w={{window}})')\n"
+            agg_code += f"                axes[i].set_title(f'{{col}} — Trend over {tcol}', fontsize=11)\n"
+            agg_code += f"                axes[i].legend()\n"
+            agg_code += f"            plt.suptitle('Trend Analysis with Rolling Averages', fontsize=13)\n"
+            agg_code += f"            plt.tight_layout()\n"
+            agg_code += f"            plt.savefig(os.path.join(r'{output_folder}', 'trend_analysis.png'), dpi=100, bbox_inches='tight')\n"
+            agg_code += f"            plt.show(); plt.close()\n"
+            agg_code += f"except Exception as e:\n"
+            agg_code += f"    print(f'Trend analysis error for {tcol}: {{e}}')\n\n"
+
+    if monotonic:
+        agg_code += "# Monotonic trend summary\n"
+        agg_code += "print('\\n=== Monotonic Trends (Spearman correlation with row index) ===')\n"
+        for col, direction in monotonic.items():
+            agg_code += f"print(f'  {col}: {direction} trend')\n"
+    elif not time_cols:
+        agg_code += "print('No time-series columns or monotonic trends detected.')\n"
+
+    cells.append(new_code_cell(agg_code))
+
+    # ---- Section 12: Pipeline Preparation & Recommendations ----
+    cells.append(new_markdown_cell("## Section 12 — Pipeline Preparation & Recommendations"))
+
+    pr = stats.get("pipeline_recommendations", {})
+    pipe_code = "# --- Pipeline Configuration Recommendations ---\n"
+    pipe_code += "print('=' * 60)\n"
+    pipe_code += "print('PIPELINE CONFIGURATION RECOMMENDATIONS')\n"
+    pipe_code += "print('=' * 60)\n\n"
+
+    suggested_task = pr.get("suggested_task", "unknown")
+    suggested_target = pr.get("suggested_target", "N/A")
+    suggested_models = pr.get("suggested_models", [])
+    suggested_metric = pr.get("suggested_metric", "N/A")
+    suggested_imputer = pr.get("suggested_imputer", "none")
+    suggested_scaler = pr.get("suggested_scaler", "StandardScaler")
+    suggested_encoder = pr.get("suggested_encoder", "none")
+    suggested_transformers = pr.get("suggested_transformers", [])
+
+    pipe_code += f"print('Task Type        : {suggested_task}')\n"
+    pipe_code += f"print('Target Column    : {suggested_target}')\n"
+    pipe_code += f"print('Recommended Models: {suggested_models}')\n"
+    pipe_code += f"print('Evaluation Metric : {suggested_metric}')\n"
+    pipe_code += f"print('Imputer Strategy  : {suggested_imputer}')\n"
+    pipe_code += f"print('Feature Scaler    : {suggested_scaler}')\n"
+    pipe_code += f"print('Categorical Encoder: {suggested_encoder}')\n"
+    pipe_code += f"print('Transformers      : {suggested_transformers}')\n"
+
+    if pr.get("class_imbalance"):
+        pipe_code += "print('\\n⚠ WARNING: Class imbalance detected!')\n"
+        pipe_code += "print('  → Consider SMOTE, class_weight=\"balanced\", or stratified CV.')\n"
+
+    if pr.get("n_classes"):
+        n_classes_val = pr["n_classes"]
+        pipe_code += f"print('Number of classes : {n_classes_val}')\n"
+
+    pipe_code += "\nprint('\\n' + '=' * 60)\n"
+    pipe_code += "print('DATASET READINESS SUMMARY')\n"
+    pipe_code += "print('=' * 60)\n"
+    pipe_code += "print(f'Final shape       : {cleaned.shape}')\n"
+    pipe_code += "print(f'Remaining nulls   : {cleaned.isnull().sum().sum()}')\n"
+    pipe_code += "print(f'Remaining dupes   : {cleaned.duplicated().sum()}')\n"
+    pipe_code += "print(f'Numeric features  : {len(cleaned.select_dtypes(include=np.number).columns)}')\n"
+    pipe_code += "print(f'Categorical feats : {len(cleaned.select_dtypes(include=[\"object\",\"category\"]).columns)}')\n\n"
+
+    pipe_code += "# Feature importance preview (correlation with target if applicable)\n"
+    if suggested_target and suggested_target != "N/A" and suggested_task in ("classification", "regression"):
+        pipe_code += f"target_col = '{suggested_target}'\n"
+        pipe_code += "if target_col in cleaned.columns:\n"
+        pipe_code += "    num_feats = cleaned.select_dtypes(include=np.number).columns.tolist()\n"
+        pipe_code += "    if target_col in num_feats:\n"
+        pipe_code += "        num_feats = [c for c in num_feats if c != target_col]\n"
+        pipe_code += "    if num_feats:\n"
+        pipe_code += "        correlations = cleaned[num_feats].corrwith(cleaned[target_col].astype(float, errors='ignore') if cleaned[target_col].dtype != object else pd.factorize(cleaned[target_col])[0]).abs().sort_values(ascending=False)\n"
+        pipe_code += "        print('\\nFeature-Target Correlations:')\n"
+        pipe_code += "        for feat, corr_val in correlations.head(10).items():\n"
+        pipe_code += "            bar = '█' * int(corr_val * 20)\n"
+        pipe_code += "            print(f'  {feat:30s} {corr_val:.4f} {bar}')\n"
+
+    # Save pipeline config as JSON
+    pipe_code += "\n# Save pipeline configuration\n"
+    pipe_code += "import json\n"
+    pipe_code += "pipeline_config = {\n"
+    pipe_code += f"    'task_type': '{suggested_task}',\n"
+    pipe_code += f"    'target_column': '{suggested_target}',\n"
+    pipe_code += f"    'suggested_models': {repr(suggested_models)},\n"
+    pipe_code += f"    'evaluation_metric': '{suggested_metric}',\n"
+    pipe_code += f"    'imputer': '{suggested_imputer}',\n"
+    pipe_code += f"    'scaler': '{suggested_scaler}',\n"
+    pipe_code += f"    'encoder': '{suggested_encoder}',\n"
+    pipe_code += f"    'transformers': {repr(suggested_transformers)},\n"
+    pipe_code += "    'dataset_shape': list(cleaned.shape),\n"
+    pipe_code += "    'feature_columns': cleaned.columns.tolist(),\n"
+    pipe_code += "}\n"
+    pipe_code += f"config_path = os.path.join(r'{output_folder}', 'pipeline_config.json')\n"
+    pipe_code += "with open(config_path, 'w') as f:\n"
+    pipe_code += "    json.dump(pipeline_config, f, indent=2, default=str)\n"
+    pipe_code += "print(f'\\nPipeline config saved to: {config_path}')\n"
+
+    cells.append(new_code_cell(pipe_code))
+
+    # ---- Section 13: Save Cleaned & Engineered Dataset ----
+    cells.append(new_markdown_cell("## Section 13 — Save Pipeline-Ready Dataset"))
     cells.append(new_code_cell(
         f"cleaned_path = r'{output_folder}/cleaned_data.csv'\n"
         "cleaned.to_csv(cleaned_path, index=False)\n"
-        "print(f'Cleaned dataset saved to: {cleaned_path}')\n"
-        f"print(f'File size: {{os.path.getsize(cleaned_path) / 1024:.1f}} KB')"
+        "print(f'Pipeline-ready dataset saved to: {cleaned_path}')\n"
+        f"print(f'File size: {{os.path.getsize(cleaned_path) / 1024:.1f}} KB')\n"
+        "print(f'Final columns ({len(cleaned.columns)}): {cleaned.columns.tolist()}')"
     ))
 
     nb = new_notebook(cells=cells)
@@ -667,6 +1142,75 @@ def _create_word_doc(
         p = doc.add_paragraph(style="List Bullet")
         p.add_run(rec)
 
+    # Feature Engineering
+    fe = stats.get("feature_engineering", {})
+    doc.add_heading("7. Feature Engineering", level=1)
+    if fe.get("interaction_candidates"):
+        doc.add_paragraph("Interaction features (correlated pairs):")
+        for c1, c2 in fe["interaction_candidates"][:5]:
+            doc.add_paragraph(f"  • {c1} × {c2}", style="List Bullet")
+    if fe.get("log_candidates"):
+        doc.add_paragraph(f"Log-transform candidates: {', '.join(fe['log_candidates'][:5])}")
+    if fe.get("date_decomp_cols"):
+        doc.add_paragraph(f"Date decomposition columns: {', '.join(fe['date_decomp_cols'])}")
+    if fe.get("binning_candidates"):
+        doc.add_paragraph(f"Binning candidates: {', '.join(fe['binning_candidates'][:5])}")
+    if not any(fe.get(k) for k in ["interaction_candidates", "log_candidates", "date_decomp_cols", "binning_candidates"]):
+        doc.add_paragraph("No automatic feature engineering opportunities detected.")
+
+    # Aggregation Analysis
+    agg = stats.get("aggregation_analysis", {})
+    doc.add_heading("8. Aggregation & GroupBy Analysis", level=1)
+    if agg.get("groupby_cols"):
+        doc.add_paragraph(f"Suitable groupby columns: {', '.join(agg['groupby_cols'])}")
+        for grp_col, summary in agg.get("groupby_summaries", {}).items():
+            doc.add_paragraph(f"  • {grp_col}: {summary.get('n_groups', '?')} groups, "
+                            f"aggregated over {summary.get('agg_columns', [])}")
+    else:
+        doc.add_paragraph("No categorical columns with 2–20 unique values found for aggregation.")
+
+    # Trend Analysis
+    trend = stats.get("trend_analysis", {})
+    doc.add_heading("9. Trend Analysis", level=1)
+    if trend.get("time_columns"):
+        doc.add_paragraph(f"Time-series columns: {', '.join(trend['time_columns'])}")
+    if trend.get("monotonic_trends"):
+        doc.add_paragraph("Monotonic trends detected:")
+        for col, direction in trend["monotonic_trends"].items():
+            doc.add_paragraph(f"  • {col}: {direction}", style="List Bullet")
+    if not trend.get("time_columns") and not trend.get("monotonic_trends"):
+        doc.add_paragraph("No significant trends detected.")
+
+    # Pipeline Recommendations
+    pr = stats.get("pipeline_recommendations", {})
+    doc.add_heading("10. Pipeline Configuration Recommendations", level=1)
+    if pr:
+        recs_table = doc.add_table(rows=1, cols=2)
+        recs_table.style = "Table Grid"
+        hdr = recs_table.rows[0].cells
+        hdr[0].text, hdr[1].text = "Parameter", "Recommendation"
+
+        params = [
+            ("Task Type", pr.get("suggested_task", "N/A")),
+            ("Target Column", pr.get("suggested_target", "N/A")),
+            ("Models", ", ".join(pr.get("suggested_models", []))),
+            ("Metric", pr.get("suggested_metric", "N/A")),
+            ("Imputer", pr.get("suggested_imputer", "N/A")),
+            ("Scaler", pr.get("suggested_scaler", "N/A")),
+            ("Encoder", pr.get("suggested_encoder", "N/A")),
+            ("Transformers", ", ".join(pr.get("suggested_transformers", []))),
+        ]
+        for param, value in params:
+            row = recs_table.add_row().cells
+            row[0].text = param
+            row[1].text = str(value)
+
+        if pr.get("class_imbalance"):
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run("⚠ Class imbalance detected — use SMOTE or class_weight='balanced'.").bold = True
+    else:
+        doc.add_paragraph("Insufficient data to generate pipeline recommendations.")
+
     doc.save(output_path)
     logger.info("Word document saved to %s", output_path)
 
@@ -675,8 +1219,8 @@ def _create_word_doc(
 # Data cleaning
 # ---------------------------------------------------------------------------
 
-def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a cleaned copy of *df*."""
+def _clean_dataframe(df: pd.DataFrame, stats: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+    """Return a cleaned copy of *df* with optional feature engineering applied."""
     cleaned = df.copy()
     cleaned = cleaned.drop_duplicates()
 
@@ -696,7 +1240,91 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             if not mode.empty:
                 cleaned[col] = cleaned[col].fillna(mode[0])
 
+    # Apply feature engineering if stats are provided
+    if stats:
+        fe = stats.get("feature_engineering", {})
+
+        # Interaction features
+        for c1, c2 in fe.get("interaction_candidates", [])[:5]:
+            if c1 in cleaned.columns and c2 in cleaned.columns:
+                try:
+                    cleaned[f"{c1}_x_{c2}"] = cleaned[c1] * cleaned[c2]
+                except Exception:
+                    pass
+
+        # Log-transform candidates
+        for col in fe.get("log_candidates", [])[:5]:
+            if col in cleaned.columns:
+                try:
+                    if (cleaned[col] > 0).all():
+                        cleaned[f"{col}_log"] = np.log1p(cleaned[col])
+                except Exception:
+                    pass
+
+        # Date decomposition
+        for col in fe.get("date_decomp_cols", [])[:3]:
+            if col in cleaned.columns:
+                try:
+                    dt = pd.to_datetime(cleaned[col], errors="coerce")
+                    if dt.notna().sum() > 0:
+                        cleaned[f"{col}_year"] = dt.dt.year
+                        cleaned[f"{col}_month"] = dt.dt.month
+                        cleaned[f"{col}_dayofweek"] = dt.dt.dayofweek
+                        cleaned[f"{col}_quarter"] = dt.dt.quarter
+                except Exception:
+                    pass
+
+        # Binning candidates
+        for col in fe.get("binning_candidates", [])[:5]:
+            if col in cleaned.columns:
+                try:
+                    cleaned[f"{col}_binned"] = pd.qcut(
+                        cleaned[col], q=5,
+                        labels=["very_low", "low", "mid", "high", "very_high"],
+                        duplicates="drop",
+                    )
+                except Exception:
+                    pass
+
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Pipeline config helper
+# ---------------------------------------------------------------------------
+
+def _save_pipeline_config(stats: Dict[str, Any], cleaned_df: pd.DataFrame, output_path: str) -> None:
+    """Save recommended pipeline configuration as JSON."""
+    import json
+    pr = stats.get("pipeline_recommendations", {})
+    config = {
+        "task_type": pr.get("suggested_task", "unknown"),
+        "target_column": pr.get("suggested_target", None),
+        "suggested_models": pr.get("suggested_models", []),
+        "evaluation_metric": pr.get("suggested_metric", "accuracy"),
+        "imputer": pr.get("suggested_imputer", "none"),
+        "scaler": pr.get("suggested_scaler", "StandardScaler"),
+        "encoder": pr.get("suggested_encoder", "none"),
+        "transformers": pr.get("suggested_transformers", []),
+        "class_imbalance": pr.get("class_imbalance", False),
+        "dataset_shape": list(cleaned_df.shape),
+        "feature_columns": cleaned_df.columns.tolist(),
+        "numeric_columns": cleaned_df.select_dtypes(include=[np.number]).columns.tolist(),
+        "categorical_columns": cleaned_df.select_dtypes(include=["object", "category"]).columns.tolist(),
+        "feature_engineering_applied": {
+            "interactions": [f"{c1}_x_{c2}" for c1, c2 in stats.get("feature_engineering", {}).get("interaction_candidates", [])[:5]],
+            "log_transforms": [f"{c}_log" for c in stats.get("feature_engineering", {}).get("log_candidates", [])[:5]],
+            "date_features": stats.get("feature_engineering", {}).get("date_decomp_cols", []),
+            "binned_features": [f"{c}_binned" for c in stats.get("feature_engineering", {}).get("binning_candidates", [])[:5]],
+        },
+        "trend_analysis": {
+            "time_columns": stats.get("trend_analysis", {}).get("time_columns", []),
+            "monotonic_trends": stats.get("trend_analysis", {}).get("monotonic_trends", {}),
+        },
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, default=str)
+    logger.info("Pipeline config saved to %s", output_path)
 
 
 # ---------------------------------------------------------------------------

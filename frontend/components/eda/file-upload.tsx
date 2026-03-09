@@ -25,7 +25,7 @@ const ACCEPTED_FORMATS = {
   "application/vnd.ms-excel": [".xls"],
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
   "application/json": [".json"],
-  "application/octet-stream": [".parquet", ".data"],
+  "application/octet-stream": [".parquet", ".data", ".file"],
 };
 
 const formatIcons: Record<string, React.ReactNode> = {
@@ -36,6 +36,7 @@ const formatIcons: Record<string, React.ReactNode> = {
   json: <FileJson className="h-4 w-4 text-yellow-500" />,
   parquet: <FileText className="h-4 w-4 text-orange-500" />,
   data: <Table2 className="h-4 w-4 text-gray-500" />,
+  file: <FileText className="h-4 w-4 text-indigo-500" />,
 };
 
 interface FileUploadProps {

@@ -176,7 +176,7 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
         <Card>
           <CardContent className="p-5">
             <h3 className="mb-4 font-semibold text-[var(--text)]">Download Results</h3>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
               <Button
                 variant="secondary"
                 className="flex-col h-auto py-3 gap-1.5"
@@ -203,6 +203,15 @@ export default function EDAResults({ job: initialJob, onUpdate }: EDAResultsProp
               >
                 <FileText className="h-5 w-5 text-purple-500" />
                 <span className="text-xs">Cleaned Data</span>
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-col h-auto py-3 gap-1.5"
+                onClick={() => downloadBlob(`/eda/jobs/${job.id}/files/pipeline_config`, "pipeline_config.json")}
+                disabled={!job.cleaned_csv_path}
+              >
+                <Table2 className="h-5 w-5 text-emerald-500" />
+                <span className="text-xs">Pipeline Config</span>
               </Button>
               <Button
                 className="flex-col h-auto py-3 gap-1.5 col-span-2 sm:col-span-1"

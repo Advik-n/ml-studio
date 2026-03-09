@@ -24,7 +24,7 @@ from utils.dependencies import require_verified_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/eda", tags=["EDA"])
 
-ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet", ".data"}
+ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx", ".json", ".parquet", ".data", ".file"}
 
 
 async def _run_eda_job(job_id: str, file_path: str, project_folder: str, db_url: str) -> None:
@@ -203,6 +203,7 @@ def download_eda_file(
         "docx": job.docx_path,
         "cleaned": job.cleaned_csv_path,
         "notebook": job.notebook_path,
+        "pipeline_config": os.path.join(job.output_folder, "pipeline_config.json") if job.output_folder else None,
     }
     download_path = path_map.get(kind)
     if not download_path or not os.path.exists(download_path):
@@ -213,6 +214,7 @@ def download_eda_file(
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "cleaned": "text/csv",
         "notebook": "application/octet-stream",
+        "pipeline_config": "application/json",
     }
     return FileResponse(
         download_path,
