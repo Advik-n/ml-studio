@@ -1,0 +1,68 @@
+name: Deploy Backend to HuggingFace Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'deploy/huggingface/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Deploy to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 << 'PYEOF'
+          import os
+          from huggingface_hub import HfApi, create_repo
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          user = api.whoami()["name"]
+          space_id = f"{user}/ml-studio-api"
+
+          # Create Space if it doesn't exist
+          create_repo(
+              space_id,
+              repo_type="space",
+              space_sdk="docker",
+              exist_ok=True,
+              token=os.environ["HF_TOKEN"],
+          )
+          print(f"Space ready: https://huggingface.co/spaces/{space_id}")
+
+          # Upload backend code
+          api.upload_folder(
+              folder_path="backend",
+              repo_id=space_id,
+              repo_type="space",
+              ignore_patterns=[
+                  "__pycache__", "*.pyc", "*.pyo",
+                  ".env", ".env.*", "uploads/*", "*.db",
+                  "venv", ".venv", ".pytest_cache",
+                  "tests/*",
+              ],
+          )
+
+          # Upload HF-specific README (with Space metadata)
+          api.upload_file(
+              path_or_fileobj="deploy/huggingface/README.md",
+              path_in_repo="README.md",
+              repo_id=space_id,
+              repo_type="space",
+          )
+
+          print(f"✅ Deployed to: https://{user}-ml-studio-api.hf.space")
+          PYEOF
