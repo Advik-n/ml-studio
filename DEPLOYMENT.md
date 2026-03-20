@@ -1,10 +1,30 @@
 # ML Studio — Deployment Guide
 
-Three-service architecture: **Vercel** (frontend) → **Render / HuggingFace** (backend) → **Supabase** (database).
+Three-service architecture: **Vercel** (frontend) → **HuggingFace Spaces** (backend) → **Supabase** (database).
 
 ---
 
-## 1. Supabase (Database) — Set Up First
+## Current Deployment Status
+
+| Service | Platform | URL | Status |
+|---------|----------|-----|--------|
+| Frontend | Vercel | https://ml-studio.vercel.app | ✅ Deployed |
+| Backend | HuggingFace Spaces | https://x0advik-ml-studio-api.hf.space | ✅ Deployed |
+| Database | Supabase | — | ⚠️ **Needs Setup** |
+
+> **⚠️ CRITICAL:** The backend currently uses ephemeral SQLite storage. User data is lost on each Space restart. Follow Step 1 below to set up persistent Supabase storage.
+
+---
+
+## 1. Supabase (Database) — **REQUIRED FOR DATA PERSISTENCE**
+
+### Quick Setup (Automated)
+```bash
+cd deploy
+bash quick_supabase_setup.sh
+```
+
+### Manual Setup
 
 1. Go to [supabase.com](https://supabase.com) → **New Project**
 2. Save your **database password** — you'll need it
@@ -18,62 +38,31 @@ Three-service architecture: **Vercel** (frontend) → **Render / HuggingFace** (
 
 ---
 
-## 2A. Render (Backend) — Option A
+## 2. HuggingFace Spaces (Backend) — Already Deployed
 
-1. Go to [render.com](https://render.com) → **New → Blueprint**
-2. Connect your GitHub repo
-3. Render auto-detects `render.yaml` at the root
-4. Set the required environment variables:
+The backend is deployed at: `https://x0advik-ml-studio-api.hf.space`
 
-   | Variable | Value |
-   |----------|-------|
-   | `DATABASE_URL` | Supabase connection string from step 1 |
-   | `CORS_ORIGINS` | Your Vercel URL (e.g. `https://ml-studio.vercel.app`) |
-   | `FRONTEND_URL` | Same as CORS_ORIGINS |
+**To connect Supabase:**
 
-5. Deploy — Render builds the Docker image from `backend/Dockerfile`
-
-> **Note**: Render provides a persistent disk at `/data` for file uploads.
-
----
-
-## 2B. HuggingFace Spaces (Backend) — Option B
-
-1. Go to [huggingface.co/spaces](https://huggingface.co/spaces) → **Create new Space**
-2. Select **Docker** as the SDK
-3. Clone the Space repo, copy the `backend/` directory contents into it
-4. Copy `deploy/huggingface/README.md` to the Space repo root (replace the default)
-5. Set **Secrets** in Space settings:
+1. Go to [HuggingFace Space Settings](https://huggingface.co/spaces/x0advik/ml-studio-api/settings)
+2. Add the following **Secret**:
 
    | Secret | Value |
    |--------|-------|
-   | `DATABASE_URL` | Supabase connection string |
-   | `SECRET_KEY` | Generate a random 32+ char string |
-   | `CORS_ORIGINS` | Your Vercel URL |
-   | `FRONTEND_URL` | Same as CORS_ORIGINS |
+   | `DATABASE_URL` | Your Supabase connection string |
 
-6. Push — HF builds and deploys automatically
+3. The Space will automatically restart and use Supabase
 
-> **Note**: HF Spaces provides persistent storage at `/data` automatically.
+> **Note**: Other secrets like `SECRET_KEY`, `CORS_ORIGINS`, and `FRONTEND_URL` are optional on HF Spaces as they have sensible defaults.
 
 ---
 
-## 3. Vercel (Frontend)
+## 3. Vercel (Frontend) — Already Deployed
 
-1. Go to [vercel.com](https://vercel.com) → **New Project**
-2. Import your GitHub repo
-3. Set **Root Directory** to `frontend`
-4. Set environment variable:
+The frontend is deployed at: `https://ml-studio.vercel.app`
 
-   | Variable | Value |
-   |----------|-------|
-   | `NEXT_PUBLIC_API_URL` | Your backend URL (Render or HF Spaces) |
-
-   Examples:
-   - Render: `https://ml-studio-api.onrender.com`
-   - HF Spaces: `https://your-username-ml-studio.hf.space`
-
-5. Deploy — Vercel auto-detects Next.js from `vercel.json`
+Environment variable (already set):
+- `NEXT_PUBLIC_API_URL` = `https://x0advik-ml-studio-api.hf.space`
 
 ---
 
@@ -81,13 +70,13 @@ Three-service architecture: **Vercel** (frontend) → **Render / HuggingFace** (
 
 ```
 ┌─────────────┐     HTTPS      ┌──────────────────┐     PostgreSQL    ┌───────────┐
-│   Vercel     │ ──────────────→│  Render / HF     │ ────────────────→│ Supabase  │
-│  (Next.js)   │                │  (FastAPI)       │                   │  (Postgres)│
-│  Frontend    │←───────────────│  Backend         │←──────────────────│  Database  │
-└─────────────┘    JSON API     └──────────────────┘    SQLAlchemy     └───────────┘
-                                       │
-                                  /data/uploads
-                                (Persistent Disk)
+│   Vercel    │ ──────────────→│  HuggingFace     │ ────────────────→│ Supabase  │
+│  (Next.js)  │                │  Spaces          │                   │ (Postgres)│
+│  Frontend   │←───────────────│  (FastAPI)       │←──────────────────│ Database  │
+└─────────────┘    JSON API    └──────────────────┘    SQLAlchemy     └───────────┘
+     ↑                                │
+     │                          /data/uploads
+ml-studio.vercel.app         (Persistent Storage)
 ```
 
 ---
@@ -95,29 +84,29 @@ Three-service architecture: **Vercel** (frontend) → **Render / HuggingFace** (
 ## Environment Variables Summary
 
 ### Frontend (Vercel)
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | ✅ | Backend API URL |
+| Variable | Required | Description | Current Value |
+|----------|----------|-------------|---------------|
+| `NEXT_PUBLIC_API_URL` | ✅ | Backend API URL | `https://x0advik-ml-studio-api.hf.space` |
 
-### Backend (Render / HF Spaces)
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | Supabase PostgreSQL URI |
-| `SECRET_KEY` | ✅ | JWT signing key (Render auto-generates) |
-| `CORS_ORIGINS` | ✅ | Vercel frontend URL |
-| `FRONTEND_URL` | ✅ | Vercel frontend URL |
-| `UPLOAD_DIR` | ❌ | Auto-detected (`/data/uploads`) |
-| `MAX_UPLOAD_SIZE_MB` | ❌ | Default: 100 |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | ❌ | Default: 60 |
+### Backend (HuggingFace Spaces)
+| Variable | Required | Description | Status |
+|----------|----------|-------------|--------|
+| `DATABASE_URL` | ✅ | Supabase PostgreSQL URI | ⚠️ **Not Set** |
+| `SECRET_KEY` | ❌ | JWT signing key (auto-generated) | ✅ Default |
+| `CORS_ORIGINS` | ❌ | Vercel frontend URL | ✅ Default (`*`) |
+| `FRONTEND_URL` | ❌ | Vercel frontend URL | ✅ Default |
+| `UPLOAD_DIR` | ❌ | Auto-detected (`/data/uploads`) | ✅ Auto |
+| `MAX_UPLOAD_SIZE_MB` | ❌ | Default: 100 | ✅ Default |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | ❌ | Default: 60 | ✅ Default |
 
 ---
 
 ## Troubleshooting
 
+**User data disappearing**: The `DATABASE_URL` secret is not set on HuggingFace Spaces. Follow Step 1 to set up Supabase.
+
 **CORS errors**: Ensure `CORS_ORIGINS` on the backend exactly matches your Vercel URL (no trailing slash).
 
 **Database connection fails**: Use the **Transaction pooler** URI (port `6543`), not the direct connection (port `5432`).
 
-**Uploads disappear on Render**: Ensure the disk is mounted. Free tier has no persistent disk — use Starter plan.
-
-**HF Space sleeps**: Free HF Spaces sleep after inactivity. Upgrade to a persistent Space or use Render.
+**HF Space sleeps**: Free HF Spaces sleep after inactivity. Data persists in Supabase when the Space wakes up.
