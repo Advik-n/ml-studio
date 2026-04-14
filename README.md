@@ -81,7 +81,7 @@ npm install
 cp .env.local.example .env.local
 npm run dev
 ```
-App at: http://localhost:3000
+App at: ml-studio-zeta.vercel.app
 
 ## 🌐 Deployment (100% Free)
 
